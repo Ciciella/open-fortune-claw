@@ -150,6 +150,110 @@
       th, td { padding: 8px 5px; }
       .refresh-btn { padding: 10px 18px; font-size: 0.85rem; bottom: 15px; right: 15px; }
     }
+    
+    /* 导航标签 */
+    .nav-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .nav-tab {
+      background: rgba(255,255,255,0.1);
+      border: none;
+      color: #888;
+      padding: 10px 20px;
+      border-radius: 20px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    .nav-tab:hover {
+      background: rgba(255,255,255,0.2);
+      color: #fff;
+    }
+    .nav-tab.active {
+      background: #00ff88;
+      color: #1a1a2e;
+      font-weight: bold;
+    }
+    
+    .page-section {
+      display: none;
+    }
+    .page-section.active {
+      display: block;
+    }
+    
+    /* 介绍页面样式 */
+    .intro-card {
+      background: rgba(255,255,255,0.1);
+      border-radius: 15px;
+      padding: 20px;
+      margin-bottom: 15px;
+    }
+    .intro-card h3 {
+      color: #00ff88;
+      margin-bottom: 12px;
+      font-size: 1.1rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .intro-card p {
+      color: #ccc;
+      line-height: 1.6;
+      font-size: 0.9rem;
+    }
+    .strategy-list {
+      list-style: none;
+      padding: 0;
+    }
+    .strategy-list li {
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .strategy-list li:last-child {
+      border-bottom: none;
+    }
+    .strategy-name {
+      color: #fff;
+      font-weight: 500;
+    }
+    .strategy-tag {
+      font-size: 0.75rem;
+      padding: 4px 10px;
+      border-radius: 12px;
+      background: rgba(0,255,136,0.2);
+      color: #00ff88;
+    }
+    .strategy-tag.testing {
+      background: rgba(255,193,7,0.2);
+      color: #ffc107;
+    }
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .feature-item {
+      background: rgba(255,255,255,0.05);
+      padding: 12px;
+      border-radius: 10px;
+      text-align: center;
+    }
+    .feature-item .icon {
+      font-size: 1.5rem;
+      margin-bottom: 5px;
+    }
+    .feature-item .label {
+      color: #888;
+      font-size: 0.8rem;
+    }
   </style>
 </head>
 <body>
@@ -162,7 +266,14 @@
       </div>
     </div>    
 
-    <div class="stats-grid">
+    <!-- 导航标签 -->
+    <div class="nav-tabs">
+      <button class="nav-tab active" onclick="showPage('dashboard')">📊 交易面板</button>
+      <button class="nav-tab" onclick="showPage('about')">ℹ️ 介绍</button>
+    </div>
+    
+    <!-- 交易面板页面 -->
+    <div id="page-dashboard" class="page-section active">
       <div class="stat-card">
         <div class="label">总交易次数</div>
         <div class="value" id="totalTrades">-</div>
@@ -251,6 +362,82 @@
         </table>
       </div>
     </div>
+    </div>  <!-- 关闭 dashboard 页面 -->
+    
+    <!-- 介绍页面 -->
+    <div id="page-about" class="page-section">
+      <div class="intro-card">
+        <h3>🤖 项目介绍</h3>
+        <p>全自动加密货币交易系统，支持多种交易策略，包括趋势交易、网格交易、资金费率套利等。系统运行在 Gate.io 测试网，支持 BTC/USDT 交易对。</p>
+      </div>
+      
+      <div class="intro-card">
+        <h3>📈 支持的交易策略</h3>
+        <ul class="strategy-list">
+          <li>
+            <span class="strategy-name">趋势交易策略</span>
+            <span class="strategy-tag">运行中</span>
+          </li>
+          <li>
+            <span class="strategy-name">网格交易策略</span>
+            <span class="strategy-tag testing">开发中</span>
+          </li>
+          <li>
+            <span class="strategy-name">资金费率套利</span>
+            <span class="strategy-tag testing">开发中</span>
+          </li>
+        </ul>
+      </div>
+      
+      <div class="intro-card">
+        <h3>📊 趋势交易策略详情</h3>
+        <p>基于多指标确认的趋势跟踪策略：</p>
+        <ul style="color: #ccc; margin-top: 10px; padding-left: 20px; line-height: 1.8;">
+          <li>RSI 指标：RSI &lt; 40 超卖买入，RSI &gt; 70 超买卖出</li>
+          <li>MA 均线：金叉买入，死叉卖出</li>
+          <li>MACD：金叉买入，死叉卖出</li>
+          <li>趋势过滤：日线 MA20 上升趋势时才买入</li>
+          <li>量价确认：成交量放大时信号更可靠</li>
+        </ul>
+        <p style="margin-top: 12px;">止盈止损：<strong style="color: #00ff88;">+3%</strong> 止盈，<strong style="color: #ff4757;">-2%</strong> 止损</p>
+      </div>
+      
+      <div class="intro-card">
+        <h3>🔧 技术架构</h3>
+        <div class="feature-grid">
+          <div class="feature-item">
+            <div class="icon">🟢</div>
+            <div class="label">Gate.io API</div>
+          </div>
+          <div class="feature-item">
+            <div class="icon">📊</div>
+            <div class="label">SQLite 数据库</div>
+          </div>
+          <div class="feature-item">
+            <div class="icon">🌐</div>
+            <div class="label">Cloudflare Tunnel</div>
+          </div>
+          <div class="feature-item">
+            <div class="icon">📱</div>
+            <div class="label">响应式 Web</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="intro-card">
+        <h3>📊 数据统计</h3>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="label">检查次数</div>
+            <div class="value" id="statChecks">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">交易次数</div>
+            <div class="value" id="statTrades">-</div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <button class="refresh-btn" onclick="loadData()">🔄</button>
@@ -272,6 +459,40 @@
     
     function getStrategyCN(strategy) {
       return strategyMap[strategy] || strategy || '-';
+    }
+    
+    // 切换页面
+    function showPage(page) {
+      // 更新标签状态
+      document.querySelectorAll('.nav-tab').forEach(tab => {
+        tab.classList.remove('active');
+      });
+      event.target.classList.add('active');
+      
+      // 切换页面显示
+      document.querySelectorAll('.page-section').forEach(section => {
+        section.classList.remove('active');
+      });
+      document.getElementById('page-' + page).classList.add('active');
+      
+      // 如果是介绍页面，加载统计数据
+      if (page === 'about') {
+        loadAboutStats();
+      }
+    }
+    
+    // 加载介绍页面统计数据
+    async function loadAboutStats() {
+      try {
+        const statsRes = await fetch(API_URL.replace('/trades', '/stats'));
+        const stats = await statsRes.json();
+        if (stats.success) {
+          document.getElementById('statChecks').textContent = stats.totalChecks || 0;
+          document.getElementById('statTrades').textContent = stats.totalTrades || 0;
+        }
+      } catch (e) {
+        console.error('加载统计失败:', e);
+      }
     }
     
     async function loadData() {
