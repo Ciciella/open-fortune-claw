@@ -7,6 +7,75 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const Database = require('better-sqlite3');
+
+// ============ 数据库初始化 ============
+const DB_PATH = path.join(__dirname, 'trading.db');
+const db = new Database(DB_PATH);
+
+// 创建检查日志表
+db.exec(`
+  CREATE TABLE IF NOT EXISTS check_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    price REAL,
+    position_size REAL,
+    position_entry_price REAL,
+    balance_total REAL,
+    balance_available REAL,
+    rsi REAL,
+    ma10 REAL,
+    ma20 REAL,
+    ma50 REAL,
+    macd_hist REAL,
+    trend TEXT,
+    volume_ok INTEGER,
+    signal_buy INTEGER,
+    signal_sell INTEGER,
+    signal_strength INTEGER,
+    signal_reason TEXT,
+    action TEXT,
+    action_amount REAL,
+    action_price REAL,
+    pnl_percent REAL
+  )
+`);
+
+// 插入检查日志
+function logCheck(data) {
+  const stmt = db.prepare(`
+    INSERT INTO check_logs (
+      timestamp, price, position_size, position_entry_price,
+      balance_total, balance_available, rsi, ma10, ma20, ma50,
+      macd_hist, trend, volume_ok, signal_buy, signal_sell,
+      signal_strength, signal_reason, action, action_amount, action_price, pnl_percent
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  stmt.run(
+    new Date().toISOString(),
+    data.price,
+    data.positionSize,
+    data.positionEntryPrice,
+    data.balanceTotal,
+    data.balanceAvailable,
+    data.rsi,
+    data.ma10,
+    data.ma20,
+    data.ma50,
+    data.macdHist,
+    data.trend,
+    data.volumeOk ? 1 : 0,
+    data.signalBuy ? 1 : 0,
+    data.signalSell ? 1 : 0,
+    data.signalStrength,
+    data.signalReason,
+    data.action,
+    data.actionAmount,
+    data.actionPrice,
+    data.pnlPercent
+  );
+}
 
 // 状态文件路径
 const STATUS_FILE = path.join(__dirname, 'bot-status.json');
@@ -44,6 +113,30 @@ function startStatusAPI() {
         pnl: tradeStatus?.pnl || 0,
         status: getBotStatus().status
       }));
+    } else if (req.url.startsWith('/logs')) {
+      // 获取检查日志
+      try {
+        const limit = parseInt(new URL(req.url, 'http://localhost').searchParams.get('limit')) || 50;
+        const logs = db.prepare('SELECT * FROM check_logs ORDER BY id DESC LIMIT ?').all(limit);
+        res.end(JSON.stringify({ success: true, logs }));
+      } catch (e) {
+        res.end(JSON.stringify({ success: false, error: e.message }));
+      }
+    } else if (req.url.startsWith('/stats')) {
+      // 获取统计信息
+      try {
+        const total = db.prepare('SELECT COUNT(*) as count FROM check_logs').get().count;
+        const trades = db.prepare("SELECT COUNT(*) as count FROM check_logs WHERE action != 'none'").get().count;
+        const lastCheck = db.prepare('SELECT timestamp, price, signal_buy, signal_sell FROM check_logs ORDER BY id DESC LIMIT 1').get();
+        res.end(JSON.stringify({ 
+          success: true, 
+          totalChecks: total,
+          totalTrades: trades,
+          lastCheck: lastCheck
+        }));
+      } catch (e) {
+        res.end(JSON.stringify({ success: false, error: e.message }));
+      }
     } else {
       res.writeHead(404);
       res.end('Not Found');
@@ -72,6 +165,24 @@ function getTradeStatus() {
   try {
     if (fs.existsSync(TRADE_FILE)) {
       return JSON.parse(fs.readFileSync(TRADE_FILE, 'utf8'));
+    }
+  } catch (e) {}
+  // 从数据库获取最新状态
+  try {
+    const latest = db.prepare('SELECT * FROM check_logs ORDER BY id DESC LIMIT 1').get();
+    if (latest) {
+      return {
+        price: latest.price,
+        position: latest.position_size,
+        balance: latest.balance_total,
+        pnl: latest.pnl_percent,
+        signals: {
+          buy: latest.signal_buy === 1,
+          sell: latest.signal_sell === 1,
+          strength: latest.signal_strength,
+          reason: latest.signal_reason
+        }
+      };
     }
   } catch (e) {}
   return null;
@@ -198,19 +309,100 @@ function exec(cmd) {
   return JSON.parse(execSync(cmd, { encoding: 'utf8', timeout: 20000 }));
 }
 
-// 获取K线数据
-function getOHLC(coin, days = 7, interval = '1d') {
-  const cmd = `node skills/crypto-market-data/scripts/get_coin_ohlc_chart.js ${coin} --days=${days}`;
-  const data = exec(cmd);
-  // 转换格式: [timestamp, open, high, low, close, volume]
-  return data.map(d => ({
-    time: d[0],
-    open: d[1],
-    high: d[2],
-    low: d[3],
-    close: d[4],
-    volume: d[5] || 0
-  }));
+// 同步 HTTP GET 请求
+function httpGet(url, timeout = 10000) {
+  const https = require('https');
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve(data));
+    });
+    req.on('error', reject);
+    req.setTimeout(timeout, () => { req.destroy(); reject(new Error('Timeout')); });
+  });
+}
+
+// 获取K线数据 (直接从 Gate.io API 获取)
+async function getOHLC(coin, days = 7, interval = '1h') {
+  // 将 coin 转换为交易对格式
+  let pair;
+  if (coin.includes('_')) {
+    pair = coin;
+  } else {
+    // 常见币种映射
+    const coinMap = {
+      'bitcoin': 'BTC',
+      'ethereum': 'ETH',
+      'solana': 'SOL',
+      'ripple': 'XRP',
+      'cardano': 'ADA',
+      'dogecoin': 'DOGE'
+    };
+    const base = coinMap[coin.toLowerCase()] || coin.toUpperCase();
+    pair = `${base}_USDT`;
+  }
+  
+  // Gate.io interval: 1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w
+  const intervalMap = { '1h': '1h', '4h': '4h', '1d': '1d', '15m': '15m', '5m': '5m', '1m': '1m' };
+  const sec = intervalMap[interval] || '1h';
+
+  const now = Math.floor(Date.now() / 1000);
+  const from = now - (days * 24 * 60 * 60);
+
+  try {
+    const data = await httpGet(`https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${pair}&interval=${sec}&from=${from}&to=${now}`);
+    let result = JSON.parse(data);
+    // Gate.io 可能返回 { data: [...] } 或直接是数组
+    if (result && result.data) result = result.data;
+    if (!Array.isArray(result)) {
+      log(`⚠️ K线数据格式错误: ${JSON.stringify(result).slice(0,100)}`);
+      return [];
+    }
+    // Gate.io 返回格式: [[timestamp, volume, close, high, low, open], ...]
+    return result.map(d => ({
+      time: d[0],
+      volume: parseFloat(d[1]),
+      close: parseFloat(d[2]),
+      high: parseFloat(d[3]),
+      low: parseFloat(d[4]),
+      open: parseFloat(d[5])
+    }));
+  } catch (e) {
+    log(`⚠️ 获取K线失败: ${e.message}`);
+    return [];
+  }
+}
+
+// 获取当前价格 (直接从 Gate.io API 获取)
+async function getCurrentPrice(coin) {
+  // 将 coin 转换为交易对格式
+  let pair;
+  if (coin.includes('_')) {
+    pair = coin;
+  } else {
+    const coinMap = {
+      'bitcoin': 'BTC',
+      'ethereum': 'ETH',
+      'solana': 'SOL',
+      'ripple': 'XRP',
+      'cardano': 'ADA',
+      'dogecoin': 'DOGE'
+    };
+    const base = coinMap[coin.toLowerCase()] || coin.toUpperCase();
+    pair = `${base}_USDT`;
+  }
+  
+  try {
+    const data = await httpGet(`https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${pair}`);
+    const result = JSON.parse(data);
+    if (result && result[0] && result[0].last) {
+      return parseFloat(result[0].last);
+    }
+  } catch (e) {
+    log(`⚠️ 获取价格失败: ${e.message}`);
+  }
+  return null;
 }
 
 // 计算简单移动平均
@@ -348,7 +540,7 @@ function isVolumeExpanding(data, threshold = 1.5) {
 
 // 获取当前价格
 function getCurrentPrice(coin) {
-  const data = exec(`node skills/crypto-market-data/scripts/get_crypto_price.js ${coin}`);
+  const data = exec(`node ../skills/crypto-market-data/scripts/get_crypto_price.js ${coin}`);
   return data[coin]?.usd;
 }
 
@@ -568,18 +760,28 @@ async function getPositionCount() {
   return 1; // 简化：目前只记录是否有持仓
 }
 
-function analyzeSignals(ohlc1h, currentPrice) {
+// 分析信号 (异步)
+async function analyzeSignals(ohlc1h, currentPrice) {
   const signals = {
     buy: false,
     sell: false,
     short: false,
     reason: [],
-    strength: 0  // 信号强度 0-5
+    strength: 0,  // 信号强度 0-5
+    // 技术指标数据 (用于日志)
+    rsi: null,
+    ma10: null,
+    ma20: null,
+    ma50: null,
+    macdHist: null,
+    trendUp: false,
+    volumeOK: true
   };
   
   // 计算指标
   const rsi_1h = calculateRSI(ohlc1h, CONFIG.rsiPeriod);
   const rsi = rsi_1h[rsi_1h.length - 1];
+  signals.rsi = rsi;
   
   const ma10 = calculateMA(ohlc1h, CONFIG.maShort);
   const ma20 = calculateMA(ohlc1h, CONFIG.maLong);
@@ -588,6 +790,9 @@ function analyzeSignals(ohlc1h, currentPrice) {
   const ma10_latest = ma10[ma10.length - 1];
   const ma20_latest = ma20[ma20.length - 1];
   const ma50_latest = ma50[ma50.length - 1];
+  signals.ma10 = ma10_latest;
+  signals.ma20 = ma20_latest;
+  signals.ma50 = ma50_latest;
   
   // MACD
   const macd = calculateMACD(ohlc1h, CONFIG.macdFast, CONFIG.macdSlow, CONFIG.macdSignal);
@@ -595,6 +800,7 @@ function analyzeSignals(ohlc1h, currentPrice) {
   const macdSignal = macd.signal[macd.signal.length - 1];
   const macdHist = macd.histogram[macd.histogram.length - 1];
   const macdPrev = macd.histogram[macd.histogram.length - 2];
+  signals.macdHist = macdHist;
   
   // 前一根K线
   const prevClose = ohlc1h[ohlc1h.length - 2].close;
@@ -608,7 +814,7 @@ function analyzeSignals(ohlc1h, currentPrice) {
   let trendUp = false;
   if (CONFIG.trendFilter) {
     try {
-      const ohlc1d = getOHLC(CONFIG.coin, 30, '1d');
+      const ohlc1d = await getOHLC(CONFIG.coin, 30, '1d');
       const ma20_1d = calculateMA(ohlc1d, CONFIG.trendMAperiod);
       const ma20_daily = ma20_1d[ma20_1d.length - 1];
       const ma20_daily_prev = ma20_1d[ma20_1d.length - 2];
@@ -620,6 +826,7 @@ function analyzeSignals(ohlc1h, currentPrice) {
   } else {
     trendUp = true;
   }
+  signals.trendUp = trendUp;
   
   // 量价确认
   let volumeOK = true;
@@ -627,6 +834,7 @@ function analyzeSignals(ohlc1h, currentPrice) {
     volumeOK = isVolumeExpanding(ohlc1h, CONFIG.volumeThreshold);
     log(`📊 成交量: ${volumeOK ? '放大✅' : '缩量❌'}`);
   }
+  signals.volumeOK = volumeOK;
   
   // ====== 多重买入信号 ======
   // 1. RSI超卖 (40以下)
@@ -720,10 +928,16 @@ async function tradeCycle() {
   log('='.repeat(50));
   log('🔄 开始交易检查...');
   
+  // 用于日志记录
+  let currentPrice = null;
+  let balance = null;
+  let position = null;
+  let signals = null;
+  
   try {
     // 1. 获取数据
-    const currentPrice = getCurrentPrice(CONFIG.coin);
-    const ohlc1h = getOHLC(CONFIG.coin, 14);    // 14天1小时K线 (足够MA50)
+    currentPrice = await getCurrentPrice(CONFIG.coin);
+    const ohlc1h = await getOHLC(CONFIG.coin, 14);    // 14天1小时K线 (足够MA50)
     
     if (!currentPrice) {
       log('❌ 无法获取价格，跳过');
@@ -733,7 +947,7 @@ async function tradeCycle() {
     log(`💰 当前价格: $${currentPrice.toLocaleString()}`);
     
     // 2. 获取账户状态
-    const [balance, position] = await Promise.all([
+    [balance, position] = await Promise.all([
       getBalance(),
       getPosition()
     ]);
@@ -743,7 +957,7 @@ async function tradeCycle() {
     }
     
     // 3. 分析信号
-    const signals = analyzeSignals(ohlc1h, currentPrice);
+    signals = await analyzeSignals(ohlc1h, currentPrice);
     
     // 4. 检查止盈止损 (多仓)
     if (position && position.size > 0) {
@@ -757,6 +971,9 @@ async function tradeCycle() {
       if (pnlPercent >= CONFIG.takeProfitPercent) {
         log(`🎯 触发固定止盈: ${pnlPercent.toFixed(2)}% >= ${CONFIG.takeProfitPercent}%`);
         await closeLong(currentPrice, position.size);
+        lastAction = 'close_long_tp';
+        lastActionAmount = position.size;
+        lastActionPrice = currentPrice;
         return;
       }
       
@@ -764,6 +981,9 @@ async function tradeCycle() {
       if (pnlPercent <= -CONFIG.stopLossPercent) {
         log(`🛑 触发止损: ${pnlPercent.toFixed(2)}% <= -${CONFIG.stopLossPercent}%`);
         await closeLong(currentPrice, position.size);
+        lastAction = 'close_long_sl';
+        lastActionAmount = position.size;
+        lastActionPrice = currentPrice;
         return;
       }
       
@@ -775,6 +995,9 @@ async function tradeCycle() {
         if (highProfitPercent >= 3 && currentProfitPercent <= (highProfitPercent - CONFIG.trailingPercent)) {
           log(`🐢 触发移动止盈: 最高${highProfitPercent.toFixed(2)}%, 现在${currentProfitPercent.toFixed(2)}%`);
           await closeLong(currentPrice, position.size);
+          lastAction = 'close_long_trailing';
+          lastActionAmount = position.size;
+          lastActionPrice = currentPrice;
           return;
         }
       }
@@ -790,6 +1013,9 @@ async function tradeCycle() {
       if (pnlPercent >= CONFIG.takeProfitPercent) {
         log(`🎯 空仓止盈: ${pnlPercent.toFixed(2)}%`);
         await closeShort(currentPrice, posSize);
+        lastAction = 'close_short_tp';
+        lastActionAmount = posSize;
+        lastActionPrice = currentPrice;
         return;
       }
       
@@ -797,6 +1023,9 @@ async function tradeCycle() {
       if (pnlPercent <= -CONFIG.stopLossPercent) {
         log(`🛑 空仓止损: ${pnlPercent.toFixed(2)}%`);
         await closeShort(currentPrice, posSize);
+        lastAction = 'close_short_sl';
+        lastActionAmount = posSize;
+        lastActionPrice = currentPrice;
         return;
       }
     }
@@ -823,6 +1052,9 @@ async function tradeCycle() {
           if (canTrade()) {
             await openLong(currentPrice, amount);
             recordTrade(currentPrice);
+            lastAction = 'open_long';
+            lastActionAmount = amount;
+            lastActionPrice = currentPrice;
           }
         }
       } else {
@@ -848,6 +1080,9 @@ async function tradeCycle() {
         if (canTrade()) {
           await closeLong(currentPrice, position.size);
           recordTrade(currentPrice);
+          lastAction = 'close_long_signal';
+          lastActionAmount = position.size;
+          lastActionPrice = currentPrice;
         }
       } else {
         log(`📊 持仓中: ${position.size} BTC @ $${position.entryPrice.toLocaleString()}, 盈亏: ${pnlPercent.toFixed(2)}%`);
@@ -858,8 +1093,47 @@ async function tradeCycle() {
     log(`❌ 交易循环错误: ${e.message}`);
   }
   
+  // 记录检查日志
+  try {
+    // 计算持仓盈亏
+    let pnlPercent = null;
+    if (position && position.size !== 0 && currentPrice && position.entryPrice) {
+      pnlPercent = (currentPrice - position.entryPrice) / position.entryPrice * 100;
+    }
+    
+    logCheck({
+      price: currentPrice,
+      positionSize: position?.size || 0,
+      positionEntryPrice: position?.entryPrice || null,
+      balanceTotal: balance?.total || null,
+      balanceAvailable: balance?.available || null,
+      rsi: signals?.rsi || null,
+      ma10: signals?.ma10 || null,
+      ma20: signals?.ma20 || null,
+      ma50: signals?.ma50 || null,
+      macdHist: signals?.macdHist || null,
+      trend: signals?.trendUp ? 'up' : 'down',
+      volumeOk: signals?.volumeOK || false,
+      signalBuy: signals?.buy || false,
+      signalSell: signals?.sell || false,
+      signalStrength: signals?.strength || 0,
+      signalReason: signals?.reason?.join('; ') || '',
+      action: lastAction,
+      actionAmount: lastActionAmount,
+      actionPrice: lastActionPrice,
+      pnlPercent: pnlPercent
+    });
+  } catch (logErr) {
+    log(`⚠️ 记录日志失败: ${logErr.message}`);
+  }
+  
   log('='.repeat(50));
 }
+
+// 记录上次操作 (用于日志)
+let lastAction = 'none';
+let lastActionAmount = null;
+let lastActionPrice = null;
 
 // 启动时写入状态
 writeBotStatus('online');

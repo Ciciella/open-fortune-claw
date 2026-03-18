@@ -68,6 +68,7 @@ open-fortune-claw/
 ├── trend-bot.js       # 趋势交易机器人
 ├── grid-bot.js        # 网格交易机器人
 ├── arbitrage-bot.js   # 资金费率套利
+├── experiments/        # 实验性代码和可行性研究
 ├── secrets.js.example  # API 密钥模板
 ├── secrets.js         # API 密钥（已忽略，不提交）
 ├── trading.db         # 本地交易数据库（已忽略）

@@ -5,6 +5,10 @@ secrets.js
 secrets.json
 !secrets.js.example
 
+# 状态文件 (本地运行生成)
+bot-status.json
+trade-status.json
+
 # Node modules (如果需要)
 # node_modules/
 

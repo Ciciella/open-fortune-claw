@@ -163,6 +163,39 @@ const server = http.createServer(async (req, res) => {
         lastUpdate: cache.lastUpdate
       }));
       
+    } else if (url === '/api/logs') {
+      // 检查日志
+      const limit = parseInt(new URL(req.url, 'http://localhost').searchParams.get('limit')) || 50;
+      db.all('SELECT * FROM check_logs ORDER BY id DESC LIMIT ?', [limit], (err, rows) => {
+        if (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: err.message }));
+        } else {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, logs: rows }));
+        }
+      });
+      return;
+      
+    } else if (url === '/api/stats') {
+      // 统计信息
+      db.get('SELECT COUNT(*) as count FROM check_logs', (err, row) => {
+        const total = row?.count || 0;
+        db.get("SELECT COUNT(*) as count FROM check_logs WHERE action != 'none'", (err2, row2) => {
+          const trades = row2?.count || 0;
+          db.get('SELECT timestamp, price, signal_buy, signal_sell FROM check_logs ORDER BY id DESC LIMIT 1', (err3, lastRow) => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: true,
+              totalChecks: total,
+              totalTrades: trades,
+              lastCheck: lastRow || null
+            }));
+          });
+        });
+      });
+      return;
+      
     } else {
       // 返回Dashboard HTML
       const htmlPath = path.join(__dirname, 'dashboard.html');

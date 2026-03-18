@@ -1,0 +1,21 @@
+{
+  "name": "open-fortune-claw",
+  "version": "1.0.0",
+  "description": "> 自动化加密货币交易系统，支持趋势交易、网格交易等多种策略",
+  "main": "arbitrage-bot.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ciciella/crypto-bot-dashboard.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Ciciella/crypto-bot-dashboard/issues"
+  },
+  "homepage": "https://github.com/Ciciella/crypto-bot-dashboard#readme"
+}
