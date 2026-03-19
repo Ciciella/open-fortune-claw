@@ -1028,6 +1028,20 @@ async function tradeCycle() {
       pnlPercent = (currentPrice - position.entryPrice) / position.entryPrice * 100;
     }
     
+    // 分析未开仓原因
+    let noOpenReason = '';
+    if (!position || position.size === 0) {
+      // 无持仓时，分析为什么不开仓
+      const reasons = [];
+      if (!signals?.buy) reasons.push('无买入信号');
+      if (signals?.buy) {
+        if (!signals.trendUp) reasons.push('趋势向下');
+        if (!signals.volumeOK) reasons.push('成交量不足');
+        if (balance?.available < 50) reasons.push('余额不足');
+      }
+      noOpenReason = reasons.length > 0 ? reasons.join('; ') : '等待信号';
+    }
+    
     logCheck({
       price: currentPrice,
       positionSize: position?.size || 0,
@@ -1044,7 +1058,7 @@ async function tradeCycle() {
       signalBuy: signals?.buy || false,
       signalSell: signals?.sell || false,
       signalStrength: signals?.strength || 0,
-      signalReason: signals?.reason?.join('; ') || '',
+      signalReason: signals?.reason?.join('; ') || noOpenReason,
       action: lastAction,
       actionAmount: lastActionAmount,
       actionPrice: lastActionPrice,

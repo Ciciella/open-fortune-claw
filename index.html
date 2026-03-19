@@ -342,7 +342,7 @@
       </div>
 
       <div class="section">
-        <h2>📋 检查日志</h2>
+        <h2>📋 系统日志</h2>
         <div class="table-wrapper">
           <table>
             <thead>
@@ -352,7 +352,7 @@
                 <th>持仓</th>
                 <th>RSI</th>
                 <th>信号</th>
-                <th>强度</th>
+                <th>原因</th>
                 <th>盈亏%</th>
                 <th>动作</th>
               </tr>
@@ -579,7 +579,7 @@
                 <td>${log.position_size || 0}</td>
                 <td>${log.rsi ? log.rsi.toFixed(1) : '-'}</td>
                 <td>${signal}</td>
-                <td>${log.signal_strength || 0}</td>
+                <td style="font-size:0.75rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;">${log.signal_reason || '-'}</td>
                 <td class="${pnl >= 0 ? 'type-open' : 'type-close'}">${pnl !== null ? (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + '%' : '-'}</td>
                 <td>${log.action === 'none' ? '-' : log.action}</td>
               </tr>`;
