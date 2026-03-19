@@ -239,8 +239,8 @@ function getTradeStatus() {
   return null;
 }
 
-// 启动API
-startStatusAPI();
+// 启动API (已禁用，使用 dashboard-api.js 3000端口)
+// startStatusAPI();
 
 // ============ 配置 ============
 const CONFIG = {
