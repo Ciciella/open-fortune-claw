@@ -769,9 +769,14 @@
       if (level) url += '&level=' + level;
       if (category) url += '&category=' + category;
       
+      const fetchUrl = API_URL.replace('/trades', url);
+      console.log('[Debug] 请求URL:', fetchUrl);
+      
       try {
-        const res = await fetch(API_URL.replace('/trades', url));
+        const res = await fetch(fetchUrl);
+        console.log('[Debug] 响应状态:', res.status);
         const data = await res.json();
+        console.log('[Debug] 数据:', data);
         
         if (data && data.success) {
           const logsHtml = data.logs.map(log => {
