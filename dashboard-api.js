@@ -177,6 +177,36 @@ const server = http.createServer(async (req, res) => {
       });
       return;
       
+    } else if (url === '/api/balance-history') {
+      // 余额历史
+      const days = parseInt(new URL(req.url, 'http://localhost').searchParams.get('days')) || 7;
+      const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+      
+      db.all('SELECT timestamp, balance_total, balance_available FROM check_logs WHERE timestamp >= ? ORDER BY id ASC', [since], (err, rows) => {
+        if (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: err.message }));
+        } else {
+          // 按小时聚合数据
+          const hourlyData = {};
+          rows.forEach(row => {
+            const date = new Date(row.timestamp);
+            const hour = new Date(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours()).toISOString();
+            if (!hourlyData[hour] || row.balance_total > hourlyData[hour].balance_total) {
+              hourlyData[hour] = {
+                timestamp: hour,
+                balance_total: row.balance_total,
+                balance_available: row.balance_available
+              };
+            }
+          });
+          
+          const history = Object.values(hourlyData).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, history }));
+        }
+      });
+      return;
     } else if (url === '/api/stats') {
       // 统计信息
       db.get('SELECT COUNT(*) as count FROM check_logs', (err, row) => {
@@ -194,6 +224,7 @@ const server = http.createServer(async (req, res) => {
           });
         });
       });
+      return;
       return;
       
     } else if (url === '/api/debug') {

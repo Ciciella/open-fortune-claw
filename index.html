@@ -349,6 +349,38 @@
       color: #888;
       font-size: 0.8rem;
     }
+
+    /* 我的页面样式 */
+    .chart-container {
+      background: rgba(255,255,255,0.05);
+      border-radius: 10px;
+      padding: 15px;
+      margin-bottom: 10px;
+    }
+    .chart-controls {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .chart-btn {
+      background: rgba(255,255,255,0.1);
+      border: none;
+      color: #888;
+      padding: 6px 14px;
+      border-radius: 15px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    .chart-btn:hover {
+      background: rgba(255,255,255,0.2);
+      color: #fff;
+    }
+    .chart-btn.active {
+      background: #00ff88;
+      color: #1a1a2e;
+    }
   </style>
 </head>
 <body>
@@ -365,6 +397,7 @@
     <div class="nav-tabs">
       <button class="nav-tab active" onclick="showPage('dashboard')">📊 交易面板</button>
       <button class="nav-tab" onclick="showPage('about')">ℹ️ 介绍</button>
+      <button class="nav-tab" onclick="showPage('my')">👤 我的</button>
     </div>
 
     <!-- 交易面板页面 -->
@@ -550,6 +583,62 @@
         </div>
       </div>
     </div>
+
+    <!-- 我的页面 -->
+    <div id="page-my" class="page-section">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="label">总资产 (USDT)</div>
+          <div class="value" id="myTotalBalance">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">可用余额 (USDT)</div>
+          <div class="value" id="myAvailableBalance">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">未实现盈亏 (USDT)</div>
+          <div class="value" id="myUnrealizedPnl">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">初始资金 (USDT)</div>
+          <div class="value" id="myInitialBalance">-</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>📈 余额趋势 (7天)</h2>
+        <div class="chart-container">
+          <canvas id="balanceChart"></canvas>
+        </div>
+        <div class="chart-controls">
+          <button class="chart-btn" onclick="loadBalanceHistory(1)">24小时</button>
+          <button class="chart-btn" onclick="loadBalanceHistory(3)">3天</button>
+          <button class="chart-btn active" onclick="loadBalanceHistory(7)">7天</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>📊 收益统计</h2>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="label">最高余额</div>
+            <div class="value green" id="maxBalance">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">最低余额</div>
+            <div class="value red" id="minBalance">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">收益</div>
+            <div class="value" id="totalProfit">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">收益率</div>
+            <div class="value" id="profitRate">-</div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <button class="refresh-btn" onclick="loadData()">🔄</button>
@@ -609,6 +698,10 @@
       // 如果是介绍页面，加载统计数据
       if (page === 'about') {
         loadAboutStats();
+      }
+      // 如果是我的页面，加载余额信息
+      if (page === 'my') {
+        loadMyPage();
       }
     }
 
@@ -832,6 +925,171 @@
       } catch(e) {
         console.error('调试日志加载失败:', e);
         document.getElementById('debugLogsTable').innerHTML = '<tr><td colspan="5" style="text-align:center">加载失败</td></tr>';
+      }
+    }
+
+    // 加载余额历史
+    let balanceChartData = null;
+    async function loadBalanceHistory(days = 7) {
+      // 更新按钮状态
+      document.querySelectorAll('.chart-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+      
+      try {
+        const res = await fetch(API_URL.replace('/trades', '/balance-history?days=' + days));
+        const data = await res.json();
+        
+        if (data.success && data.history && data.history.length > 0) {
+          balanceChartData = data.history;
+          drawBalanceChart(data.history);
+          
+          // 计算统计数据
+          const balances = data.history.map(h => h.balance_total);
+          const maxBal = Math.max(...balances);
+          const minBal = Math.min(...balances);
+          const firstBal = balances[0];
+          const lastBal = balances[balances.length - 1];
+          const profit = lastBal - firstBal;
+          const profitRate = firstBal > 0 ? (profit / firstBal * 100) : 0;
+          
+          document.getElementById('maxBalance').textContent = maxBal.toFixed(2);
+          document.getElementById('minBalance').textContent = minBal.toFixed(2);
+          document.getElementById('totalProfit').textContent = (profit >= 0 ? '+' : '') + profit.toFixed(2);
+          document.getElementById('totalProfit').className = 'value ' + (profit >= 0 ? 'green' : 'red');
+          document.getElementById('profitRate').textContent = (profitRate >= 0 ? '+' : '') + profitRate.toFixed(2) + '%';
+          document.getElementById('profitRate').className = 'value ' + (profitRate >= 0 ? 'green' : 'red');
+        } else {
+          document.getElementById('maxBalance').textContent = '-';
+          document.getElementById('minBalance').textContent = '-';
+          document.getElementById('totalProfit').textContent = '-';
+          document.getElementById('profitRate').textContent = '-';
+        }
+      } catch(e) {
+        console.error('加载余额历史失败:', e);
+      }
+    }
+
+    // 绘制余额图表
+    function drawBalanceChart(data) {
+      const canvas = document.getElementById('balanceChart');
+      const ctx = canvas.getContext('2d');
+      
+      // 设置画布大小
+      const rect = canvas.parentElement.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = 200;
+      
+      const width = canvas.width;
+      const height = canvas.height;
+      const padding = 40;
+      
+      // 清除画布
+      ctx.clearRect(0, 0, width, height);
+      
+      if (data.length < 2) {
+        ctx.fillStyle = '#888';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('数据不足', width/2, height/2);
+        return;
+      }
+      
+      const values = data.map(d => d.balance_total);
+      const minVal = Math.min(...values) * 0.98;
+      const maxVal = Math.max(...values) * 1.02;
+      const range = maxVal - minVal || 1;
+      
+      // 绘制网格线
+      ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = padding + (height - 2 * padding) * i / 4;
+        ctx.beginPath();
+        ctx.moveTo(padding, y);
+        ctx.lineTo(width - padding, y);
+        ctx.stroke();
+        
+        // Y轴标签
+        const val = maxVal - (range * i / 4);
+        ctx.fillStyle = '#666';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(val.toFixed(0), padding - 5, y + 3);
+      }
+      
+      // 绘制线条
+      const gradient = ctx.createLinearGradient(0, padding, 0, height - padding);
+      gradient.addColorStop(0, 'rgba(0, 255, 136, 0.3)');
+      gradient.addColorStop(1, 'rgba(0, 255, 136, 0)');
+      
+      ctx.beginPath();
+      data.forEach((d, i) => {
+        const x = padding + (width - 2 * padding) * i / (data.length - 1);
+        const y = padding + (height - 2 * padding) * (1 - (d.balance_total - minVal) / range);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      
+      ctx.strokeStyle = '#00ff88';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      
+      // 填充区域
+      ctx.lineTo(width - padding, height - padding);
+      ctx.lineTo(padding, height - padding);
+      ctx.closePath();
+      ctx.fillStyle = gradient;
+      ctx.fill();
+      
+      // 绘制数据点
+      data.forEach((d, i) => {
+        const x = padding + (width - 2 * padding) * i / (data.length - 1);
+        const y = padding + (height - 2 * padding) * (1 - (d.balance_total - minVal) / range);
+        
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = '#00ff88';
+        ctx.fill();
+      });
+      
+      // X轴标签 (显示时间)
+      const labelCount = Math.min(6, data.length);
+      for (let i = 0; i < labelCount; i++) {
+        const idx = Math.floor(i * (data.length - 1) / (labelCount - 1));
+        const x = padding + (width - 2 * padding) * idx / (data.length - 1);
+        const date = new Date(data[idx].timestamp);
+        const label = `${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:00`;
+        
+        ctx.fillStyle = '#666';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(label, x, height - 10);
+      }
+    }
+
+    // 加载我的页面数据
+    async function loadMyPage() {
+      try {
+        // 获取当前余额
+        const res = await fetch(API_URL.replace('/trades', '/positions'));
+        const data = await res.json();
+        
+        if (data.balance) {
+          document.getElementById('myTotalBalance').textContent = data.balance.total?.toFixed(2) || '-';
+          document.getElementById('myAvailableBalance').textContent = data.balance.available?.toFixed(2) || '-';
+          
+          const pnl = data.balance.unrealisedPnl || 0;
+          document.getElementById('myUnrealizedPnl').textContent = (pnl >= 0 ? '+' : '') + pnl.toFixed(2);
+          document.getElementById('myUnrealizedPnl').className = 'value ' + (pnl >= 0 ? 'green' : 'red');
+        }
+        
+        // 初始资金 (假设1200 USDT)
+        document.getElementById('myInitialBalance').textContent = '1200.00';
+        
+        // 加载余额历史
+        loadBalanceHistory(7);
+      } catch(e) {
+        console.error('加载我的页面失败:', e);
       }
     }
     
