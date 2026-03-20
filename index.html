@@ -716,7 +716,7 @@
 
   <script>
     const PAGE_SIZE = 10;
-    const API_URL = 'https://watches-notification-specifically-und.trycloudflare.com/api/trades';
+    const API_URL = 'https://true-align-motoritaries-suggested.trycloudflare.com/api/trades';
     let currentPage = 1;
     let totalTrades = [];
     let totalPages = 1;
@@ -799,7 +799,7 @@
       btn.classList.add('refreshing');
       try {
         // 获取状态
-        const statusRes = await fetch('https://watches-notification-specifically-und.trycloudflare.com/api/status');
+        const statusRes = await fetch('https://true-align-motoritaries-suggested.trycloudflare.com/api/status');
         const status = await statusRes.json();
         const statusEl = document.getElementById('botStatus');
         if (status.status === 'online') {
