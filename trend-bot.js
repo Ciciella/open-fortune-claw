@@ -985,6 +985,29 @@ async function tradeCycle() {
         lastAction = 'close_long_tp';
         lastActionAmount = position.size;
         lastActionPrice = currentPrice;
+        // 记录日志
+        logCheck({
+          price: currentPrice,
+          positionSize: 0,
+          positionEntryPrice: position.entryPrice,
+          balanceTotal: balance?.total || null,
+          balanceAvailable: balance?.available || null,
+          rsi: signals?.rsi || null,
+          ma10: signals?.ma10 || null,
+          ma20: signals?.ma20 || null,
+          ma50: signals?.ma50 || null,
+          macdHist: signals?.macdHist || null,
+          trend: signals?.trendUp ? 'up' : 'down',
+          volumeOk: signals?.volumeOK || false,
+          signalBuy: signals?.buy || false,
+          signalSell: signals?.sell || false,
+          signalStrength: signals?.strength || 0,
+          signalReason: `止盈平仓 (+${pnlPercent.toFixed(2)}%)`,
+          action: lastAction,
+          actionAmount: lastActionAmount,
+          actionPrice: lastActionPrice,
+          pnlPercent: pnlPercent
+        });
         return;
       }
       
@@ -995,6 +1018,29 @@ async function tradeCycle() {
         lastAction = 'close_long_sl';
         lastActionAmount = position.size;
         lastActionPrice = currentPrice;
+        // 记录日志
+        logCheck({
+          price: currentPrice,
+          positionSize: 0,
+          positionEntryPrice: position.entryPrice,
+          balanceTotal: balance?.total || null,
+          balanceAvailable: balance?.available || null,
+          rsi: signals?.rsi || null,
+          ma10: signals?.ma10 || null,
+          ma20: signals?.ma20 || null,
+          ma50: signals?.ma50 || null,
+          macdHist: signals?.macdHist || null,
+          trend: signals?.trendUp ? 'up' : 'down',
+          volumeOk: signals?.volumeOK || false,
+          signalBuy: signals?.buy || false,
+          signalSell: signals?.sell || false,
+          signalStrength: signals?.strength || 0,
+          signalReason: `止损平仓 (${pnlPercent.toFixed(2)}%)`,
+          action: lastAction,
+          actionAmount: lastActionAmount,
+          actionPrice: lastActionPrice,
+          pnlPercent: pnlPercent
+        });
         return;
       }
       
@@ -1009,6 +1055,29 @@ async function tradeCycle() {
           lastAction = 'close_long_trailing';
           lastActionAmount = position.size;
           lastActionPrice = currentPrice;
+          // 记录日志
+          logCheck({
+            price: currentPrice,
+            positionSize: 0,
+            positionEntryPrice: position.entryPrice,
+            balanceTotal: balance?.total || null,
+            balanceAvailable: balance?.available || null,
+            rsi: signals?.rsi || null,
+            ma10: signals?.ma10 || null,
+            ma20: signals?.ma20 || null,
+            ma50: signals?.ma50 || null,
+            macdHist: signals?.macdHist || null,
+            trend: signals?.trendUp ? 'up' : 'down',
+            volumeOk: signals?.volumeOK || false,
+            signalBuy: signals?.buy || false,
+            signalSell: signals?.sell || false,
+            signalStrength: signals?.strength || 0,
+            signalReason: `移动止盈平仓`,
+            action: lastAction,
+            actionAmount: lastActionAmount,
+            actionPrice: lastActionPrice,
+            pnlPercent: currentProfitPercent
+          });
           return;
         }
       }
@@ -1027,6 +1096,29 @@ async function tradeCycle() {
         lastAction = 'close_short_tp';
         lastActionAmount = posSize;
         lastActionPrice = currentPrice;
+        // 记录日志
+        logCheck({
+          price: currentPrice,
+          positionSize: 0,
+          positionEntryPrice: position.entryPrice,
+          balanceTotal: balance?.total || null,
+          balanceAvailable: balance?.available || null,
+          rsi: signals?.rsi || null,
+          ma10: signals?.ma10 || null,
+          ma20: signals?.ma20 || null,
+          ma50: signals?.ma50 || null,
+          macdHist: signals?.macdHist || null,
+          trend: signals?.trendUp ? 'up' : 'down',
+          volumeOk: signals?.volumeOK || false,
+          signalBuy: signals?.buy || false,
+          signalSell: signals?.sell || false,
+          signalStrength: signals?.strength || 0,
+          signalReason: `空仓止盈平仓 (+${pnlPercent.toFixed(2)}%)`,
+          action: lastAction,
+          actionAmount: lastActionAmount,
+          actionPrice: lastActionPrice,
+          pnlPercent: pnlPercent
+        });
         return;
       }
       
@@ -1037,6 +1129,29 @@ async function tradeCycle() {
         lastAction = 'close_short_sl';
         lastActionAmount = posSize;
         lastActionPrice = currentPrice;
+        // 记录日志
+        logCheck({
+          price: currentPrice,
+          positionSize: 0,
+          positionEntryPrice: position.entryPrice,
+          balanceTotal: balance?.total || null,
+          balanceAvailable: balance?.available || null,
+          rsi: signals?.rsi || null,
+          ma10: signals?.ma10 || null,
+          ma20: signals?.ma20 || null,
+          ma50: signals?.ma50 || null,
+          macdHist: signals?.macdHist || null,
+          trend: signals?.trendUp ? 'up' : 'down',
+          volumeOk: signals?.volumeOK || false,
+          signalBuy: signals?.buy || false,
+          signalSell: signals?.sell || false,
+          signalStrength: signals?.strength || 0,
+          signalReason: `空仓止损平仓 (${pnlPercent.toFixed(2)}%)`,
+          action: lastAction,
+          actionAmount: lastActionAmount,
+          actionPrice: lastActionPrice,
+          pnlPercent: pnlPercent
+        });
         return;
       }
     }

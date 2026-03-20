@@ -570,6 +570,24 @@
       'mean_reversion': '均值回归'
     };
 
+    // 动作中文映射
+    const actionMap = {
+      'open_long': '开多仓',
+      'close_long_tp': '止盈平仓',
+      'close_long_sl': '止损平仓',
+      'close_long_trailing': '移动止盈',
+      'close_long_signal': '信号平仓',
+      'open_short': '开空仓',
+      'close_short_tp': '空仓止盈',
+      'close_short_sl': '空仓止损',
+      'close_short_signal': '空仓信号平仓',
+      'none': '-'
+    };
+
+    function getActionCN(action) {
+      return actionMap[action] || action || '-';
+    }
+
     function getStrategyCN(strategy) {
       return strategyMap[strategy] || strategy || '-';
     }
@@ -694,7 +712,7 @@
                 <td>${signal}</td>
                 <td style="font-size:0.75rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;">${log.signal_reason || '-'}</td>
                 <td class="${pnl >= 0 ? 'type-open' : 'type-close'}">${pnl !== null ? (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + '%' : '-'}</td>
-                <td>${log.action === 'none' ? '-' : log.action}</td>
+                <td>${getActionCN(log.action)}</td>
               </tr>`;
             }).join('');
             document.getElementById('logsTable').innerHTML = logsHtml || '<tr><td colspan="8" style="text-align:center">暂无记录</td></tr>';
