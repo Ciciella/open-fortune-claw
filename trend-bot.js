@@ -18,6 +18,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,
+    symbol TEXT NOT NULL,
     type TEXT NOT NULL,
     side TEXT NOT NULL,
     amount REAL NOT NULL,
@@ -27,6 +28,13 @@ db.exec(`
     pnl REAL DEFAULT 0
   )
 `);
+
+// 尝试添加 symbol 列 (如果表已存在且缺少该列)
+try {
+  db.exec(`ALTER TABLE trades ADD COLUMN symbol TEXT NOT NULL DEFAULT 'BTC_USDT'`);
+} catch (e) {
+  // 列已存在，忽略错误
+}
 
 // 创建检查日志表
 db.exec(`
@@ -111,11 +119,12 @@ function logError(msg, details) { debugLog('ERROR', 'ERROR', msg, details); }
 function recordTradeToDb(type, side, amount, price, reason, pnl = 0) {
   try {
     const stmt = db.prepare(`
-      INSERT INTO trades (timestamp, type, side, amount, price, strategy, reason, pnl)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO trades (timestamp, symbol, type, side, amount, price, strategy, reason, pnl)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       new Date().toISOString(),
+      CONFIG.symbol,
       type,
       side,
       amount,
@@ -124,7 +133,7 @@ function recordTradeToDb(type, side, amount, price, reason, pnl = 0) {
       reason,
       pnl
     );
-    console.log(`📝 交易记录已写入: ${type} ${side} ${amount} @ ${price}`);
+    console.log(`📝 交易记录已写入: ${CONFIG.symbol} ${type} ${side} ${amount} @ ${price}`);
   } catch (e) {
     console.error('写入交易记录失败:', e.message);
   }
@@ -253,7 +262,15 @@ const CONFIG = {
   
   // 信号确认
   confirmRequired: 1,        // 只需要1次信号就执行 (分批建仓)
-  cooldownMinutes: 5         // 交易后冷却5分钟
+  cooldownMinutes: 5,        // 交易后冷却5分钟
+  
+  // ====== 分批建仓 (DCA) ======
+  dcaEnabled: true,           // 开启分批建仓
+  dcaMaxPositions: 3,        // 最多3批持仓
+  dcaAddPercent: -2,         // 跌幅超过2%加仓
+  dcaAddAmount: 5,           // 每次加仓数量 (BTC)
+  dcaCooldownMinutes: 30,   // 加仓冷却30分钟
+  dcaReduceOnTP: true        // 止盈时是否减仓
 };
 
 // 写入机器人状态
@@ -669,6 +686,7 @@ async function getMarkPrice() {
 }
 
 // 开多仓
+// 开多仓
 async function openLong(price, amount) {
   const startTime = Date.now();
   try {
@@ -678,6 +696,7 @@ async function openLong(price, amount) {
       price: '0',
       tif: 'ioc'
     };
+    
     const result = await futuresApi.createFuturesOrder('usdt', order);
     const fillPrice = result.body.fillPrice || price;
     const orderId = result.body.id;
@@ -1025,6 +1044,8 @@ async function tradeCycle() {
         lastActionPrice = currentPrice;
         // 写入交易记录
         recordTradeToDb('close', 'long', position.size, currentPrice, '止盈平仓', pnlPercent);
+        // 重置DCA状态
+        resetDCAState();
         // 记录日志
         logCheck({
           price: currentPrice,
@@ -1060,6 +1081,8 @@ async function tradeCycle() {
         lastActionPrice = currentPrice;
         // 写入交易记录
         recordTradeToDb('close', 'long', position.size, currentPrice, '止损平仓', pnlPercent);
+        // 重置DCA状态
+        resetDCAState();
         // 记录日志
         logCheck({
           price: currentPrice,
@@ -1099,6 +1122,8 @@ async function tradeCycle() {
           lastActionPrice = currentPrice;
           // 写入交易记录
           recordTradeToDb('close', 'long', position.size, currentPrice, '移动止盈', currentProfitPercent);
+          // 重置DCA状态
+          resetDCAState();
           // 记录日志
           logCheck({
             price: currentPrice,
@@ -1204,14 +1229,103 @@ async function tradeCycle() {
       }
     }
     
-    // 5. 分批建仓逻辑
+    // 5. 分批建仓 (DCA) 逻辑
     
-    if (!position || position.size === 0) {
-      // 无持仓，可以建仓
-      const positionCount = 0; // 简化：每次都是首次建仓
+    // 首先从API同步DCA状态
+    if (position && position.size > 0) {
+      // 有持仓，同步状态
+      if (dcaPositionCount === 0) {
+        // 可能是重启后的第一次同步
+        dcaPositionCount = 1;
+        dcaAvgEntryPrice = position.entryPrice;
+      }
+    } else if (!position || position.size === 0) {
+      // 无持仓，重置DCA状态
+      if (dcaPositionCount > 0) {
+        resetDCAState();
+      }
+    }
+    
+    // 计算当前持仓均价 (从API获取最新)
+    const currentEntryPrice = position?.entryPrice || dcaAvgEntryPrice;
+    const currentPositionSize = position?.size || 0;
+    const pnlPercent = currentPositionSize > 0 ? (currentPrice - currentEntryPrice) / currentEntryPrice * 100 : 0;
+    
+    log(`📊 DCA状态: 批次=${dcaPositionCount}/${CONFIG.dcaMaxPositions}, 均价=$${currentEntryPrice.toLocaleString()}, 盈亏=${pnlPercent.toFixed(2)}%`);
+    
+    // ====== 有持仓：检查加仓或平仓 ======
+    if (position && position.size > 0) {
+      
+      // 检查加仓条件 (DCA)
+      const canAddPosition = CONFIG.dcaEnabled && 
+                            dcaPositionCount < CONFIG.dcaMaxPositions &&
+                            pnlPercent <= CONFIG.dcaAddPercent;  // 跌幅达到阈值
+      
+      if (canAddPosition) {
+        // 检查加仓冷却
+        const now = Date.now();
+        const dcaCooldownMs = CONFIG.dcaCooldownMinutes * 60 * 1000;
+        const timeSinceLastAdd = now - lastAddPositionTime;
+        
+        if (timeSinceLastAdd >= dcaCooldownMs) {
+          // 满足加仓条件
+          const addAmount = CONFIG.dcaAddAmount;
+          
+          // 检查余额
+          const balanceAvail = balance?.available ?? 0;
+          const maxAffordable = balanceAvail > 0 ? (balanceAvail * 0.1 / (currentPrice / 10000)) : 0;
+          const actualAmount = Math.min(addAmount, Math.floor(maxAffordable * 100) / 100);
+          
+          if (actualAmount >= 0.01) {
+            log(`📉 DCA加仓! 跌幅${pnlPercent.toFixed(2)}% >= ${CONFIG.dcaAddPercent}%`);
+            log(`🚀 加仓 (第${dcaPositionCount + 1}批): ${actualAmount} BTC @ $${currentPrice.toLocaleString()}`);
+            
+            // 计算该批止盈止损价格
+            const tpPrice = currentPrice * (1 + CONFIG.takeProfitPercent / 100);
+            const slPrice = currentPrice * (1 - CONFIG.stopLossPercent / 100);
+            log(`📌 止盈: $${Math.floor(tpPrice).toLocaleString()}, 止损: $${Math.floor(slPrice).toLocaleString()}`);
+            
+            await openLong(currentPrice, actualAmount);
+            updateDCAState(actualAmount, currentPrice);
+            lastAddPositionTime = now;
+            
+            lastAction = 'add_position';
+            lastActionAmount = actualAmount;
+            lastActionPrice = currentPrice;
+            recordTradeToDb('open', 'long', actualAmount, currentPrice, `DCA加仓 (${pnlPercent.toFixed(2)}%)`);
+          } else {
+            log(`❌ 加仓失败: 余额不足 ${maxAffordable.toFixed(4)} < 0.01 BTC`);
+          }
+        } else {
+          const remaining = Math.round((dcaCooldownMs - timeSinceLastAdd) / 60000);
+          log(`⏳ 加仓冷却中，还需等待 ${remaining} 分钟`);
+        }
+      }
+      
+      // 平仓信号
+      if (signals.sell) {
+        log(`🔻 平多仓: ${position.size} BTC @ $${currentPrice.toLocaleString()}`);
+        log(`📋 原因: ${signals.reason.join(' + ')}`);
+        
+        if (canTrade()) {
+          await closeLong(currentPrice, position.size);
+          recordTrade(currentPrice);
+          lastAction = 'close_long_signal';
+          lastActionAmount = position.size;
+          lastActionPrice = currentPrice;
+          // 写入交易记录
+          recordTradeToDb('close', 'long', position.size, currentPrice, signals.reason.join(' + '), pnlPercent);
+          resetDCAState();
+        }
+      } else {
+        log(`📊 持仓中: ${position.size} BTC @ $${currentEntryPrice.toLocaleString()}, 盈亏: ${pnlPercent.toFixed(2)}%`);
+      }
+      
+    } else {
+      // ====== 无持仓：首次建仓 ======
       
       if (signals.buy) {
-        // 计算建仓数量 (分批)
+        // 计算建仓数量
         let amount = CONFIG.baseTradeAmount;
         
         // ========== 详细日志 ==========
@@ -1249,16 +1363,23 @@ async function tradeCycle() {
           }
           
           if (canTradeResult) {
-            log(`🚀 开多仓 (第${positionCount + 1}批): ${amount} BTC @ $${currentPrice.toLocaleString()}`);
+            log(`🚀 开多仓 (第1批): ${amount} BTC @ $${currentPrice.toLocaleString()}`);
             log(`📋 信号: ${signals.reason.join(' + ')} (强度: ${signals.strength})`);
             
+            // 计算止盈止损价格
+            const tpPrice = currentPrice * (1 + CONFIG.takeProfitPercent / 100);
+            const slPrice = currentPrice * (1 - CONFIG.stopLossPercent / 100);
+            log(`📌 止盈: $${Math.floor(tpPrice).toLocaleString()}, 止损: $${Math.floor(slPrice).toLocaleString()}`);
+            
             await openLong(currentPrice, amount);
+            updateDCAState(amount, currentPrice);
             recordTrade(currentPrice);
             lastAction = 'open_long';
             lastActionAmount = amount;
             lastActionPrice = currentPrice;
             // 写入交易记录
             recordTradeToDb('open', 'long', amount, currentPrice, signals.reason.join(' + '));
+            lastAddPositionTime = Date.now();
           }
         } else {
           log(`❌ 不满足建仓条件: 金额 ${amount.toFixed(4)} < 0.01 BTC 或余额不足`);
@@ -1266,34 +1387,6 @@ async function tradeCycle() {
       } else {
         log('⏸️ 无买入信号，保持观望');
         log(`📋 原因: ${signals.reason.join(' + ') || '无明显信号'}`);
-      }
-    } else if (position.size > 0) {
-      // 有多仓，检查是否加仓或平仓
-      
-      // 检查是否加仓 (价格下跌时补仓)
-      const pnlPercent = (currentPrice - position.entryPrice) / position.entryPrice * 100;
-      
-      if (signals.buy && pnlPercent < 0 && pnlPercent > -5) {
-        // 浮亏时，如果又有买入信号，可以加仓
-        log(`📈 浮亏${pnlPercent.toFixed(2)}%，符合加仓条件`);
-      }
-      
-      // 平仓信号
-      if (signals.sell) {
-        log(`🔻 平多仓: ${position.size} BTC @ $${currentPrice.toLocaleString()}`);
-        log(`📋 原因: ${signals.reason.join(' + ')}`);
-        
-        if (canTrade()) {
-          await closeLong(currentPrice, position.size);
-          recordTrade(currentPrice);
-          lastAction = 'close_long_signal';
-          lastActionAmount = position.size;
-          lastActionPrice = currentPrice;
-          // 写入交易记录
-          recordTradeToDb('close', 'long', position.size, currentPrice, signals.reason.join(' + '), pnlPercent);
-        }
-      } else {
-        log(`📊 持仓中: ${position.size} BTC @ $${position.entryPrice.toLocaleString()}, 盈亏: ${pnlPercent.toFixed(2)}%`);
       }
     }
     
@@ -1356,6 +1449,35 @@ async function tradeCycle() {
 let lastAction = 'none';
 let lastActionAmount = null;
 let lastActionPrice = null;
+
+// ====== 分批建仓 (DCA) 状态 ======
+let dcaPositionCount = 0;        // 当前持仓批次数
+let dcaAvgEntryPrice = 0;        // 平均持仓成本
+let lastAddPositionTime = 0;     // 上次加仓时间
+
+// 计算新的平均持仓成本
+function updateDCAState(newSize, newPrice) {
+  if (dcaPositionCount === 0) {
+    // 首次建仓
+    dcaAvgEntryPrice = newPrice;
+    dcaPositionCount = 1;
+  } else {
+    // 加仓：重新计算平均成本
+    const totalCost = dcaAvgEntryPrice * dcaPositionCount + newPrice * newSize;
+    const totalSize = dcaPositionCount + newSize;
+    dcaAvgEntryPrice = totalCost / totalSize;
+    dcaPositionCount += 1;
+  }
+  log(`📊 DCA状态更新: 批次=${dcaPositionCount}, 均价=$${dcaAvgEntryPrice.toLocaleString()}`);
+}
+
+// 重置DCA状态 (全部平仓时)
+function resetDCAState() {
+  dcaPositionCount = 0;
+  dcaAvgEntryPrice = 0;
+  lastAddPositionTime = 0;
+  log('📊 DCA状态已重置');
+}
 
 // 启动时写入状态
 writeBotStatus('online');
