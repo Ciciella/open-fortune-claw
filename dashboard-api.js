@@ -207,6 +207,41 @@ const server = http.createServer(async (req, res) => {
         }
       });
       return;
+    } else if (url === '/api/config') {
+      // 交易参数配置
+      const config = {
+        // 交易对
+        symbol: 'BTC_USDT',
+        mode: 'live',
+        timeframe: '15m + 1h',
+        
+        // 交易参数
+        baseTradeAmount: 5,
+        maxPositions: 3,
+        
+        // 止盈止损
+        takeProfitPercent: 3,
+        stopLossPercent: 2,
+        
+        // 技术指标参数
+        rsiPeriod: 14,
+        rsiOversold: 40,
+        rsiOverbought: 70,
+        maShort: 10,
+        maLong: 20,
+        
+        // 智能间隔
+        checkIntervalWithPosition: 30,
+        checkIntervalWithoutPosition: 5,
+        
+        // 其他
+        confirmRequired: 1,
+        cooldownMinutes: 15
+      };
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, config }));
+      
     } else if (url === '/api/stats') {
       // 统计信息
       db.get('SELECT COUNT(*) as count FROM check_logs', (err, row) => {

@@ -247,13 +247,13 @@ const CONFIG = {
   trailingStop: true,
   trailingPercent: 1.5,
   
-  // 检查间隔 (智能调整)
-  checkIntervalWithPosition: 30 * 1000,   // 有持仓: 30秒
-  checkIntervalWithoutPosition: 5 * 60 * 1000,  // 无持仓: 5分钟
+  // 检查间隔 (智能调整) - 优化后
+  checkIntervalWithPosition: 15 * 1000,   // 有持仓: 15秒
+  checkIntervalWithoutPosition: 60 * 1000,  // 无持仓: 1分钟
   
   // 信号确认
   confirmRequired: 1,        // 只需要1次信号就执行 (分批建仓)
-  cooldownMinutes: 15        // 交易后冷却15分钟
+  cooldownMinutes: 5         // 交易后冷却5分钟
 };
 
 // 写入机器人状态

@@ -398,6 +398,7 @@
       <button class="nav-tab active" onclick="showPage('dashboard')">📊 交易面板</button>
       <button class="nav-tab" onclick="showPage('about')">ℹ️ 介绍</button>
       <button class="nav-tab" onclick="showPage('my')">👤 我的</button>
+      <button class="nav-tab" onclick="showPage('settings')">⚙️ 设置</button>
     </div>
 
     <!-- 交易面板页面 -->
@@ -639,6 +640,76 @@
         </div>
       </div>
     </div>
+
+    <!-- 设置页面 -->
+    <div id="page-settings" class="page-section">
+      <div class="intro-card">
+        <h3>⚙️ 交易参数</h3>
+        <div id="configList">
+          <p style="color:#888;text-align:center;padding:20px;">加载中...</p>
+        </div>
+      </div>
+
+      <div class="intro-card">
+        <h3>📊 买入信号条件</h3>
+        <ul class="strategy-list">
+          <li>
+            <span class="strategy-name">RSI 超卖</span>
+            <span class="strategy-tag">RSI &lt; 40</span>
+          </li>
+          <li>
+            <span class="strategy-name">MA 金叉</span>
+            <span class="strategy-tag">MA10 &gt; MA20</span>
+          </li>
+          <li>
+            <span class="strategy-name">RSI 低位回升</span>
+            <span class="strategy-tag">RSI从低点回升</span>
+          </li>
+          <li>
+            <span class="strategy-name">MACD 金叉</span>
+            <span class="strategy-tag">Histogram 转正</span>
+          </li>
+          <li>
+            <span class="strategy-name">MACD 多头排列</span>
+            <span class="strategy-tag">DIF &gt; DEA</span>
+          </li>
+          <li>
+            <span class="strategy-name">突破 MA</span>
+            <span class="strategy-tag">突破 MA20/MA50</span>
+          </li>
+          <li>
+            <span class="strategy-name">放量上涨</span>
+            <span class="strategy-tag">成交量放大</span>
+          </li>
+          <li>
+            <span class="strategy-name">趋势向上 + RSI 不过高</span>
+            <span class="strategy-tag">MA20上升 &amp; RSI &lt; 70</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="intro-card">
+        <h3>🛡️ 风控参数</h3>
+        <ul class="strategy-list">
+          <li>
+            <span class="strategy-name">止盈</span>
+            <span class="strategy-tag" style="background:rgba(0,255,136,0.2);color:#00ff88;">+3%</span>
+          </li>
+          <li>
+            <span class="strategy-name">止损</span>
+            <span class="strategy-tag" style="background:rgba(255,71,87,0.2);color:#ff4757;">-2%</span>
+          </li>
+          <li>
+            <span class="strategy-name">交易冷却</span>
+            <span class="strategy-tag">15 分钟</span>
+          </li>
+          <li>
+            <span class="strategy-name">最多持仓批数</span>
+            <span class="strategy-tag">3 批</span>
+          </li>
+        </ul>
+      </div>
+    </div>
   </div>
 
   <button class="refresh-btn" onclick="loadData()">🔄</button>
@@ -702,6 +773,10 @@
       // 如果是我的页面，加载余额信息
       if (page === 'my') {
         loadMyPage();
+      }
+      // 如果是设置页面，加载配置
+      if (page === 'settings') {
+        loadSettings();
       }
     }
 
@@ -1097,6 +1172,42 @@
     loadDebugLogs();
     setInterval(loadData, 10000); // 每10秒自动刷新
     setInterval(loadDebugLogs, 15000); // 调试日志每15秒刷新
+
+    // 加载设置页面配置
+    async function loadSettings() {
+      try {
+        const res = await fetch(API_URL.replace('/trades', '/config'));
+        const data = await res.json();
+        
+        if (data.success && data.config) {
+          const c = data.config;
+          const configHtml = `
+            <ul class="strategy-list">
+              <li><span class="strategy-name">交易对</span><span class="strategy-tag">${c.symbol}</span></li>
+              <li><span class="strategy-name">模式</span><span class="strategy-tag">${c.mode}</span></li>
+              <li><span class="strategy-name">时间周期</span><span class="strategy-tag">${c.timeframe}</span></li>
+              <li><span class="strategy-name">每次建仓数量</span><span class="strategy-tag">${c.baseTradeAmount} BTC</span></li>
+              <li><span class="strategy-name">最多持仓批数</span><span class="strategy-tag">${c.maxPositions} 批</span></li>
+              <li><span class="strategy-name">止盈</span><span class="strategy-tag" style="background:rgba(0,255,136,0.2);color:#00ff88;">+${c.takeProfitPercent}%</span></li>
+              <li><span class="strategy-name">止损</span><span class="strategy-tag" style="background:rgba(255,71,87,0.2);color:#ff4757;">-${c.stopLossPercent}%</span></li>
+              <li><span class="strategy-name">RSI 周期</span><span class="strategy-tag">${c.rsiPeriod}</span></li>
+              <li><span class="strategy-name">RSI 超卖</span><span class="strategy-tag">&lt; ${c.rsiOversold}</span></li>
+              <li><span class="strategy-name">RSI 超买</span><span class="strategy-tag">&gt; ${c.rsiOverbought}</span></li>
+              <li><span class="strategy-name">MA 短期</span><span class="strategy-tag">MA${c.maShort}</span></li>
+              <li><span class="strategy-name">MA 长期</span><span class="strategy-tag">MA${c.maLong}</span></li>
+              <li><span class="strategy-name">有持仓检查间隔</span><span class="strategy-tag">${c.checkIntervalWithPosition} 秒</span></li>
+              <li><span class="strategy-name">无持仓检查间隔</span><span class="strategy-tag">${c.checkIntervalWithoutPosition} 分钟</span></li>
+              <li><span class="strategy-name">确认次数</span><span class="strategy-tag">${c.confirmRequired} 次</span></li>
+              <li><span class="strategy-name">交易冷却</span><span class="strategy-tag">${c.cooldownMinutes} 分钟</span></li>
+            </ul>
+          `;
+          document.getElementById('configList').innerHTML = configHtml;
+        }
+      } catch(e) {
+        console.error('加载配置失败:', e);
+        document.getElementById('configList').innerHTML = '<p style="color:#ff4757;text-align:center;padding:20px;">加载失败</p>';
+      }
+    }
   </script>
 </body>
 </html>
