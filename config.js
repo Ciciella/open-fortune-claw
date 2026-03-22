@@ -5,5 +5,5 @@
 
 const CONFIG = {
   // API 基础地址
-  API_BASE_URL: 'https://operators-input-replacing-nested.trycloudflare.com',
+  API_BASE_URL: 'https://gear-serum-seminars-monte.trycloudflare.com',
 };
