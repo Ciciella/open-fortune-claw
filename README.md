@@ -86,6 +86,14 @@ open-fortune-claw/
 
 - [Gate.io API v4 开发者文档](https://www.gate.com/docs/developers/apiv4/en/#application-for-marketers)
 
+## 推荐注册
+
+### Gate.io 合约交易所
+
+使用邀请链接注册可获得 **20% 手续费返佣**：
+
+🔗 **邀请链接**: https://www.gateport.business/share/VVIVAQGKAQ
+
 ## 注意事项
 
 - ⚠️ 当前使用 Gate.io **测试网**，不会产生真实资金
