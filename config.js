@@ -5,5 +5,6 @@
 
 const CONFIG = {
   // API 基础地址
-  API_BASE_URL: 'https://fwd-responsibility-hook-seniors.trycloudflare.com',
+  // API_BASE_URL: 'http://localhost:3000',
+  API_BASE_URL: 'https://leonard-dark-values-surfaces.trycloudflare.com',
 };
