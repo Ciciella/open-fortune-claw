@@ -103,6 +103,34 @@
     .position-card .card-value.positive { color: #00ff88; }
     .position-card .card-value.negative { color: #ff4757; }
 
+    .log-card {
+      background: rgba(255,255,255,0.06);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      border-left: 3px solid #888;
+    }
+    .log-card.level-info { border-left-color: #4fc3f7; }
+    .log-card.level-warn { border-left-color: #ffb74d; }
+    .log-card.level-error { border-left-color: #ff5252; }
+    .log-card.level-success { border-left-color: #00ff88; }
+    .log-card .card-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 0.8rem;
+    }
+    .log-card .card-time { color: #888; }
+    .log-card .level-badge {
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.7rem;
+      font-weight: bold;
+    }
+    .log-card .card-category { color: #888; font-size: 0.75rem; margin-bottom: 4px; }
+    .log-card .card-message { font-size: 0.85rem; margin-bottom: 6px; word-break: break-word; }
+    .log-card .card-details { font-size: 0.75rem; color: #666; word-break: break-all; }
+
     .section { margin-bottom: 20px; }
     .section h2 { margin-bottom: 10px; color: #00ff88; font-size: 1.1rem; }
 
@@ -651,21 +679,8 @@
           </select>
           <button onclick="loadDebugLogs()">🔄 刷新</button>
         </div>
-        <div class="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>时间</th>
-                <th>级别</th>
-                <th>类型</th>
-                <th>消息</th>
-                <th>详情</th>
-              </tr>
-            </thead>
-            <tbody id="debugLogsTable">
-              <tr><td colspan="5" style="text-align:center">加载中...</td></tr>
-            </tbody>
-          </table>
+        <div id="debugLogsContainer" class="debug-logs-container">
+          <div style="text-align:center;padding:20px;color:#888;">加载中...</div>
         </div>
       </div>
     </div>  <!-- 关闭 dashboard 页面 -->
@@ -1167,11 +1182,11 @@
             const time = new Date(log.timestamp).toLocaleString('zh-CN', {month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit'});
             const levelClass = {
               'INFO': 'level-info',
-              'WARN': 'level-warn', 
+              'WARN': 'level-warn',
               'ERROR': 'level-error',
               'SUCCESS': 'level-success'
             }[log.level] || '';
-            
+
             let details = '-';
             if (log.details) {
               try {
@@ -1181,23 +1196,25 @@
                 details = log.details;
               }
             }
-            
-            return `<tr>
-              <td class="time">${time}</td>
-              <td><span class="level-badge ${levelClass}">${log.level}</span></td>
-              <td>${log.category}</td>
-              <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${log.message}</td>
-              <td style="font-size:0.7rem;max-width:250px;word-break:break-all;">${details}</td>
-            </tr>`;
+
+            return `<div class="log-card ${levelClass}">
+              <div class="card-header">
+                <span class="card-time">${time}</span>
+                <span class="level-badge ${levelClass}">${log.level}</span>
+              </div>
+              <div class="card-category">${log.category}</div>
+              <div class="card-message">${log.message}</div>
+              <div class="card-details">${details}</div>
+            </div>`;
           }).join('');
-          
-          document.getElementById('debugLogsTable').innerHTML = logsHtml || '<tr><td colspan="5" style="text-align:center">暂无记录</td></tr>';
+
+          document.getElementById('debugLogsContainer').innerHTML = logsHtml || '<div style="text-align:center;padding:20px;color:#888;">暂无记录</div>';
         } else {
-          document.getElementById('debugLogsTable').innerHTML = '<tr><td colspan="5" style="text-align:center">暂无记录</td></tr>';
+          document.getElementById('debugLogsContainer').innerHTML = '<div style="text-align:center;padding:20px;color:#888;">暂无记录</div>';
         }
       } catch(e) {
         console.error('调试日志加载失败:', e);
-        document.getElementById('debugLogsTable').innerHTML = '<tr><td colspan="5" style="text-align:center">加载失败</td></tr>';
+        document.getElementById('debugLogsContainer').innerHTML = '<div style="text-align:center;padding:20px;color:#888;">加载失败</div>';
       }
     }
 
