@@ -134,8 +134,8 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added strategyMode (trend/grid/arbitrage/smart), strongTrendThreshold, weakTrendThreshold"
     },
     {
       "id": "US-011",

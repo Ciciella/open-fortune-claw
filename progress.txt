@@ -90,3 +90,13 @@
 - **Learnings for future iterations:**
   - The position amount formula: amount = balance * (positionPercent/100) * leverage / currentPrice
 ---
+
+## 2026-03-30 - US-010
+- What was implemented: Added multi-strategy mode configuration
+  - strategyMode: 'trend' | 'grid' | 'arbitrage' | 'smart' (default 'trend')
+  - strongTrendThreshold (number, default 5)
+  - weakTrendThreshold (number, default 2)
+- Files changed: app/services/trend_bot.ts
+- **Learnings for future iterations:**
+  - US-011 will implement the smart strategy switching logic
+---

@@ -58,6 +58,10 @@ interface Config {
   signalWeak: number
   strongMultiplier: number
   weakMultiplier: number
+  // Multi-strategy mode config
+  strategyMode: 'trend' | 'grid' | 'arbitrage' | 'smart'
+  strongTrendThreshold: number
+  weakTrendThreshold: number
   // Internally managed
   leverage: number
 }
@@ -94,6 +98,9 @@ const CONFIG: Config = {
   signalWeak: 2,
   strongMultiplier: 1.5,
   weakMultiplier: 0.5,
+  strategyMode: 'trend',
+  strongTrendThreshold: 5,
+  weakTrendThreshold: 2,
   leverage: 10,
 }
 
