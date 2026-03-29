@@ -33,7 +33,12 @@
       "Bash(dir *.db *.sqlite)",
       "mcp__chrome-devtools__navigate_page",
       "mcp__chrome-devtools__list_pages",
-      "WebFetch(domain:leonard-dark-values-surfaces.trycloudflare.com)"
+      "WebFetch(domain:leonard-dark-values-surfaces.trycloudflare.com)",
+      "Bash(npm list:*)",
+      "Read(//c/Users/18742/.claude/**)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\18742\\.claude\\plugins"
     ]
   }
 }
