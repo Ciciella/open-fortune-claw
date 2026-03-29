@@ -955,6 +955,16 @@ async function tradeCycle() {
         }
       }
 
+      // Smart strategy switching (when strategyMode is 'smart')
+      if (CONFIG.strategyMode === 'smart') {
+        if (signals.strength >= CONFIG.strongTrendThreshold) {
+          debugLog('INFO', 'STRATEGY', `智能策略切换: 使用趋势策略 (信号强度${signals.strength} >= ${CONFIG.strongTrendThreshold})`)
+        } else if (signals.strength <= CONFIG.weakTrendThreshold) {
+          debugLog('INFO', 'STRATEGY', `智能策略切换: 建议使用网格策略 (信号强度${signals.strength} <= ${CONFIG.weakTrendThreshold})`)
+        }
+        // Otherwise continue with current strategy - no logging needed
+      }
+
       // DCA check
       const canAddPosition = CONFIG.dcaEnabled &&
         dcaPositionCount < CONFIG.dcaMaxPositions &&

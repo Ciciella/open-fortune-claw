@@ -100,3 +100,14 @@
 - **Learnings for future iterations:**
   - US-011 will implement the smart strategy switching logic
 ---
+
+## 2026-03-30 - US-011
+- What was implemented: Implemented smart strategy switching logic
+  - When strategyMode is 'smart', evaluates signals.strength against thresholds
+  - Log at INFO level when trend strength >= strongTrendThreshold (use trend strategy)
+  - Log at INFO level when trend strength <= weakTrendThreshold (use grid strategy)
+  - Otherwise continue with current strategy (no log)
+- Files changed: app/services/trend_bot.ts
+- **Learnings for future iterations:**
+  - All 11 user stories are now complete! Smart switching logs suggestions but actual switching would require coordination with other bot services (grid_bot, arbitrage_bot)
+---
