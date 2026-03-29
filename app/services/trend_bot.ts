@@ -44,6 +44,7 @@ interface Config {
   dcaAddPercent: number
   dcaAddAmount: number
   dcaCooldownMinutes: number
+  dcaReduceOnTP: boolean
   // Internally managed
   leverage: number
 }
@@ -64,10 +65,11 @@ const CONFIG: Config = {
   checkIntervalWithPosition: 30000,
   checkIntervalWithoutPosition: 300000,
   dcaEnabled: true,
-  dcaMaxPositions: 5,
-  dcaAddPercent: -3,
-  dcaAddAmount: 0.01,
-  dcaCooldownMinutes: 10,
+  dcaMaxPositions: 3,
+  dcaAddPercent: -2,
+  dcaAddAmount: 5,
+  dcaCooldownMinutes: 30,
+  dcaReduceOnTP: false,
   leverage: 10,
 }
 
