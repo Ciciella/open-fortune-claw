@@ -837,6 +837,30 @@ function canTrade(): boolean {
   return Date.now() - signalHistory.lastTradeTime >= cooldownMs
 }
 
+// ============ Dynamic Position Sizing ============
+function calculatePositionPercent(signalStrength: number, balanceAvail: number): number {
+  // Determine base percentage based on signal strength
+  let percent: number
+  if (signalStrength >= CONFIG.signalStrong) {
+    percent = CONFIG.basePercent * CONFIG.strongMultiplier
+  } else if (signalStrength <= CONFIG.signalWeak) {
+    percent = CONFIG.basePercent * CONFIG.weakMultiplier
+  } else {
+    percent = CONFIG.basePercent
+  }
+
+  // Cap at maxPercent and floor at minPercent
+  percent = Math.min(percent, CONFIG.maxPercent)
+  percent = Math.max(percent, CONFIG.minPercent)
+
+  // If balance < 1000 USDT, use minPercent
+  if (balanceAvail < 1000) {
+    percent = CONFIG.minPercent
+  }
+
+  return percent
+}
+
 // ============ Main Trade Cycle ============
 let checkInterval = CONFIG.checkIntervalWithoutPosition
 
@@ -964,14 +988,12 @@ async function tradeCycle() {
     } else {
       // No position - check for buy signal
       if (signals.buy) {
-        let amount = CONFIG.baseTradeAmount
         const balanceAvail = balance?.available ?? 0
-        const maxAffordable = balanceAvail > 0 ? (balanceAvail * 0.1 / (currentPrice / 10000)) : 0
-        amount = Math.min(amount, Math.floor(maxAffordable * 100) / 100)
-        amount = Math.max(amount, 0.001)
+        const positionPercent = calculatePositionPercent(signals.strength, balanceAvail)
+        const amount = balanceAvail > 0 ? (balanceAvail * (positionPercent / 100) * CONFIG.leverage / currentPrice) : 0
 
         if (amount >= 0.01 && canTrade()) {
-          log(`[TrendBot] 开多仓: ${amount} BTC @ $${currentPrice}`)
+          log(`[TrendBot] 开多仓: ${amount.toFixed(4)} BTC @ $${currentPrice} (信号强度${signals.strength}, 仓位比例${positionPercent}%)`)
           await openLong(currentPrice, amount)
           updateDCAState(amount, currentPrice)
           recordTrade('open', 'long', amount, currentPrice, signals.reason.join(' + '))

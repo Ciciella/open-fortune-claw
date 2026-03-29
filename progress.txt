@@ -76,3 +76,17 @@
 - **Learnings for future iterations:**
   - Dynamic position sizing config added - US-009 will implement the actual calculation
 ---
+
+## 2026-03-30 - US-009
+- What was implemented: Implemented dynamic position size calculation
+  - calculatePositionPercent() function: determines position % based on signal strength
+  - signal >= signalStrong: basePercent * strongMultiplier
+  - signal <= signalWeak: basePercent * weakMultiplier
+  - else: basePercent
+  - Capped at maxPercent, floored at minPercent
+  - If balance < 1000 USDT, uses minPercent
+  - Position open logic updated to use dynamic sizing instead of fixed baseTradeAmount
+- Files changed: app/services/trend_bot.ts
+- **Learnings for future iterations:**
+  - The position amount formula: amount = balance * (positionPercent/100) * leverage / currentPrice
+---

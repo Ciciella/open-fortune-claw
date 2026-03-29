@@ -120,8 +120,8 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "calculatePositionPercent() adjusts size by signal strength, capped/floored, low balance uses minPercent"
     },
     {
       "id": "US-010",
