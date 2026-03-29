@@ -45,6 +45,11 @@ interface Config {
   dcaAddAmount: number
   dcaCooldownMinutes: number
   dcaReduceOnTP: boolean
+  // Trailing stop config
+  initialTP: number
+  trailingPercent: number
+  minTrailingTP: number
+  maxTrailingTP: number
   // Internally managed
   leverage: number
 }
@@ -70,6 +75,10 @@ const CONFIG: Config = {
   dcaAddAmount: 5,
   dcaCooldownMinutes: 30,
   dcaReduceOnTP: false,
+  initialTP: 3,
+  trailingPercent: 1,
+  minTrailingTP: 2,
+  maxTrailingTP: 5,
   leverage: 10,
 }
 

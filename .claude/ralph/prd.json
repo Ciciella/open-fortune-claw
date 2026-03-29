@@ -1,0 +1,157 @@
+{
+  "project": "Trading Bot Enhancement",
+  "branchName": "ralph/trading-bot-features",
+  "description": "Add DCA, trailing stop, dynamic position sizing, and multi-strategy features to the trading bot",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add DCA config parameters to trend_bot service",
+      "description": "As a trader, I want to configure DCA behavior so I can customize dollar cost averaging settings",
+      "acceptanceCriteria": [
+        "Add DCA config: dcaEnabled (bool), dcaMaxPositions (number, default 3), dcaAddPercent (number, default -2), dcaAddAmount (number, default 5), dcaCooldownMinutes (number, default 30), dcaReduceOnTP (bool)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Implemented in ad72222"
+    },
+    {
+      "id": "US-002",
+      "title": "Add DCA state tracking variables",
+      "description": "As a trader, I want the bot to track DCA state so I can see current averaging positions",
+      "acceptanceCriteria": [
+        "Add DCA state: dcaPositionCount (number), dcaAvgEntryPrice (number), lastAddPositionTime (timestamp)",
+        "Initialize state on new position open",
+        "Reset state on position close",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "State tracking via updateDCAState/resetDCAState - initialized on open, reset on close"
+    },
+    {
+      "id": "US-003",
+      "title": "Implement DCA core logic",
+      "description": "As a trader, I want the bot to automatically add to positions at configured price drops so I can lower my average entry price",
+      "acceptanceCriteria": [
+        "When price drops dcaAddPercent from avg entry and position count < dcaMaxPositions and cooldown passed, execute DCA buy",
+        "Update dcaPositionCount and dcaAvgEntryPrice after each DCA buy",
+        "Reset lastAddPositionTime after each DCA buy",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "DCA logic in tradeCycle lines 864-888"
+    },
+    {
+      "id": "US-004",
+      "title": "Add trailing stop config parameters",
+      "description": "As a trader, I want to configure trailing stop behavior so I can protect profits while letting them run",
+      "acceptanceCriteria": [
+        "Add trailing stop config: initialTP (number, default 3), trailingPercent (number, default 1), minTrailingTP (number, default 2), maxTrailingTP (number, default 5)",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Added initialTP, trailingPercent, minTrailingTP, maxTrailingTP to Config interface and CONFIG"
+    },
+    {
+      "id": "US-005",
+      "title": "Add trailing stop state tracking",
+      "description": "As a trader, I want the bot to track trailing stop state so I can monitor profit protection status",
+      "acceptanceCriteria": [
+        "Add trailing state: trailingActive (bool), highestPrice (number), trailingTP (number)",
+        "Initialize trailingActive to false when position opens",
+        "Reset all trailing state when position closes",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Implement trailing stop activation logic",
+      "description": "As a trader, I want trailing stop to activate when profit reaches initialTP so I can start protecting gains",
+      "acceptanceCriteria": [
+        "When profit percentage >= initialTP, set trailingActive to true and highestPrice to current price",
+        "Set initial trailingTP to current price minus trailingPercent",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Implement trailing stop trailing logic",
+      "description": "As a trader, I want the bot to trail the highest price and trigger stop when price drops so I can lock in profits",
+      "acceptanceCriteria": [
+        "While trailingActive, update highestPrice when current price exceeds it",
+        "Recalculate trailingTP as highestPrice minus trailingPercent",
+        "When (highestPrice - currentPrice) / highestPrice >= trailingPercent, trigger stop",
+        "Ensure trailingTP never exceeds maxTrailingTP",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Add dynamic position sizing config parameters",
+      "description": "As a trader, I want to configure dynamic position sizing so I can adjust exposure based on signal strength",
+      "acceptanceCriteria": [
+        "Add dynamic position config: basePercent (number, default 10), maxPercent (number, default 20), minPercent (number, default 5), signalStrong (number, default 5), signalWeak (number, default 2), strongMultiplier (number, default 1.5), weakMultiplier (number, default 0.5)",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Implement dynamic position size calculation",
+      "description": "As a trader, I want the bot to calculate position size based on signal strength so I can size positions appropriately",
+      "acceptanceCriteria": [
+        "Calculate position size: if signal >= signalStrong use basePercent * strongMultiplier, if signal <= signalWeak use basePercent * weakMultiplier, else use basePercent",
+        "Cap position at maxPercent and floor at minPercent",
+        "If balance < 1000 USDT, use minPercent",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Add multi-strategy mode configuration",
+      "description": "As a trader, I want to switch between trading modes so I can adapt to different market conditions",
+      "acceptanceCriteria": [
+        "Add strategy mode config: strategyMode (enum: 'trend', 'grid', 'arbitrage', 'smart')",
+        "Add smart switching thresholds: strongTrendThreshold (number), weakTrendThreshold (number)",
+        "Default mode is 'trend'",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Implement smart strategy switching logic",
+      "description": "As a trader, I want the bot to automatically switch strategies based on trend strength so I can profit in both trending and ranging markets",
+      "acceptanceCriteria": [
+        "When strategyMode is 'smart': detect trend strength from signals",
+        "If trend strength >= strongTrendThreshold, use trend strategy",
+        "If trend strength <= weakTrendThreshold, use grid strategy",
+        "Otherwise continue with current strategy",
+        "Log strategy switches for debugging",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

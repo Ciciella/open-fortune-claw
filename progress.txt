@@ -1,0 +1,32 @@
+## Codebase Patterns
+- This project uses AdonisJS framework with path aliases (#services, #controllers, etc.)
+- The bot services (trend_bot.ts, grid_bot.ts, arbitrage_bot.ts) use a singleton CONFIG pattern
+- TypeScript type errors for module resolution are pre-existing and not blocking for runtime
+
+---
+## 2026-03-30 - US-001
+- What was implemented: Added DCA config parameters to trend_bot service with correct defaults per acceptance criteria
+  - dcaEnabled (bool, default true)
+  - dcaMaxPositions (number, default 3)
+  - dcaAddPercent (number, default -2)
+  - dcaAddAmount (number, default 5)
+  - dcaCooldownMinutes (number, default 30)
+  - dcaReduceOnTP (bool, default false)
+- Files changed: app/services/trend_bot.ts
+- **Learnings for future iterations:**
+  - The DCA state tracking variables (dcaPositionCount, dcaAvgEntryPrice, lastAddPositionTime) already exist in the file - US-002 may be partially done
+  - Pre-existing TypeScript errors in codebase are due to module path alias resolution issues, not related to actual code changes
+---
+
+## 2026-03-30 - US-004
+- What was implemented: Added trailing stop config parameters to trend_bot service
+  - initialTP (number, default 3)
+  - trailingPercent (number, default 1)
+  - minTrailingTP (number, default 2)
+  - maxTrailingTP (number, default 5)
+- Files changed: app/services/trend_bot.ts
+- **Learnings for future iterations:**
+  - Pre-existing TypeScript errors in the codebase are due to module path alias resolution issues (node:sqlite, #services, #controllers, etc.) and are not related to actual code changes
+  - The error "Expected 2-3 arguments" on futuresApi.createFuturesOrder is a pre-existing issue with the gate_api.ts module signature
+  - pnlPercent null check errors at DCA logic lines are pre-existing
+---

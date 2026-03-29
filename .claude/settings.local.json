@@ -29,7 +29,11 @@
       "Bash(find /c/Users/18742/.openclaw/workspace/open-fortune-claw/app -type f -name *.ts)",
       "Bash(git commit:*)",
       "Bash(git add:*)",
-      "Bash(git revert:*)"
+      "Bash(git revert:*)",
+      "Bash(git:*)",
+      "Bash(node:*)",
+      "Bash(bash \"C:/Users/18742/.claude/plugins/marketplaces/ralph-marketplace/ralph.sh\" --tool amp)",
+      "Bash(bash \"C:/Users/18742/.claude/plugins/marketplaces/ralph-marketplace/ralph.sh\" --tool claude)"
     ]
   }
 }
