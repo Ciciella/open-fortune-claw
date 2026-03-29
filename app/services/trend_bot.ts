@@ -1,7 +1,5 @@
 import { getDb, all, get, run } from './database.js'
 import { fetchPositionsAndBalance, futuresApi } from './gate_api.js'
-import fs from 'fs'
-import path from 'path'
 
 // ============ Configuration ============
 interface TradingSettings {
@@ -130,22 +128,34 @@ export function initializeDatabase() {
     )
   `)
 
+  // Create settings table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      leverage INTEGER NOT NULL DEFAULT 10,
+      updated_at TEXT NOT NULL
+    )
+  `)
+
+  // Initialize settings row if not exists
+  const settingsRow = db.prepare('SELECT leverage FROM settings WHERE id = 1').get()
+  if (!settingsRow) {
+    db.prepare('INSERT INTO settings (id, leverage, updated_at) VALUES (1, 10, ?)').run(new Date().toISOString())
+  }
+
   console.log('[TrendBot] Database initialized')
 }
 
 // ============ Settings Management ============
 function loadTradingSettings(): TradingSettings {
   try {
-    const settingsPath = path.join(process.cwd(), 'trading-settings.json')
-    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
-    
-    let leverage = parseInt(String(settings.leverage)) || 10
+    const row = getDb().prepare('SELECT leverage FROM settings WHERE id = 1').get() as { leverage: number } | undefined
+    let leverage = row?.leverage || 10
     if (leverage > CONFIG.maxLeverage) {
       console.log(`⚠️ 杠杆 ${leverage}x 超过安全限制 ${CONFIG.maxLeverage}x，已调整为 ${CONFIG.maxLeverage}x`)
       leverage = CONFIG.maxLeverage
     }
     if (leverage < 1) leverage = 1
-    
     return { leverage }
   } catch {
     return { leverage: 10 }
@@ -211,20 +221,6 @@ function writeHeartbeat(status: 'alive' | 'offline' = 'alive') {
   }
 }
 
-// ============ Bot Status ============
-const STATUS_FILE = path.join(process.cwd(), 'bot-status.json')
-
-function writeBotStatus(status: 'online' | 'offline') {
-  try {
-    fs.writeFileSync(STATUS_FILE, JSON.stringify({
-      status,
-      bot: 'trend-bot',
-      timestamp: Date.now(),
-    }))
-  } catch (e: any) {
-    // Ignore
-  }
-}
 
 // ============ Cached State ============
 let cachedPosition: any = null
@@ -688,7 +684,7 @@ export async function startTrendBot() {
   log(`[TrendBot] RSI: 超卖<${CONFIG.rsiOversold}, 超买>${CONFIG.rsiOverbought}`)
   log(`[TrendBot] 止盈${CONFIG.takeProfitPercent}%, 止损${CONFIG.stopLossPercent}%`)
 
-  writeBotStatus('online')
+  writeHeartbeat('alive')
   writeHeartbeat()
 
   // Initial run
@@ -696,7 +692,7 @@ export async function startTrendBot() {
 
   // Schedule regular runs
   botInterval = setInterval(async () => {
-    writeBotStatus('online')
+    writeHeartbeat('alive')
     writeHeartbeat()
 
     const position = await getPosition()
@@ -709,16 +705,16 @@ export async function startTrendBot() {
 
   // Handle shutdown
   process.on('exit', () => {
-    writeBotStatus('offline')
+    writeHeartbeat('offline')
     writeHeartbeat('offline')
   })
   process.on('SIGINT', () => {
-    writeBotStatus('offline')
+    writeHeartbeat('offline')
     writeHeartbeat('offline')
     process.exit()
   })
   process.on('SIGTERM', () => {
-    writeBotStatus('offline')
+    writeHeartbeat('offline')
     writeHeartbeat('offline')
     process.exit()
   })
@@ -729,6 +725,6 @@ export function stopTrendBot() {
     clearInterval(botInterval)
     botInterval = null
   }
-  writeBotStatus('offline')
+  writeHeartbeat('offline')
   writeHeartbeat('offline')
 }

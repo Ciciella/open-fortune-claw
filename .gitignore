@@ -24,7 +24,6 @@ dist/
 .cache/
 
 # Status files
-bot-status.json
 trade-status.json
 
 # Temporary files

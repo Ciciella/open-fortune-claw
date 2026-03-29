@@ -1,15 +1,20 @@
 import type { HttpContext } from '@adonisjs/core/http'
-import fs from 'fs'
-import path from 'path'
+import { getDb } from '../../services/database.js'
 
-const SETTINGS_PATH = path.join(process.cwd(), 'trading-settings.json')
 const MAX_LEVERAGE = 100
 
 export default class TradingSettingsController {
   async index({ response }: HttpContext) {
     try {
-      const settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'))
-      return response.json({ success: true, settings })
+      const db = getDb()
+      const row = db.prepare('SELECT leverage, updated_at FROM settings WHERE id = 1').get() as any
+      return response.json({
+        success: true,
+        settings: {
+          leverage: row?.leverage || 10,
+          updatedAt: row?.updated_at || null
+        }
+      })
     } catch (e: any) {
       return response.json({ success: false, error: e.message })
     }
@@ -28,20 +33,18 @@ export default class TradingSettingsController {
         })
       }
 
-      // Cap at safe maximum
       if (leverage > MAX_LEVERAGE) {
         warning = `杠杆已限制在安全值 ${MAX_LEVERAGE}x（原始请求: ${leverage}x）`
         leverage = MAX_LEVERAGE
       }
 
-      const settings = {
-        leverage,
-        updatedAt: new Date().toISOString()
+      const db = getDb()
+      db.prepare('UPDATE settings SET leverage = ?, updated_at = ? WHERE id = 1').run(leverage, new Date().toISOString())
+
+      const result: any = {
+        success: true,
+        settings: { leverage, updatedAt: new Date().toISOString() }
       }
-
-      fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2))
-
-      const result: any = { success: true, settings }
       if (warning) result.warning = warning
       return response.json(result)
     } catch (e: any) {
