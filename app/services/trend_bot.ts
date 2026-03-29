@@ -259,20 +259,17 @@ function loadTradingSettings(): TradingSettings {
 
 // ============ Logging Functions ============
 function debugLog(level: 'INFO' | 'WARN' | 'ERROR' | 'SUCCESS', category: string, message: string, details: any = null) {
+  const timestamp = new Date().toISOString()
+  const detailsStr = details ? JSON.stringify(details) : null
+
   try {
     const stmt = getDb().prepare(`
       INSERT INTO debug_logs (timestamp, level, category, message, details)
       VALUES (?, ?, ?, ?, ?)
     `)
-    stmt.run(
-      new Date().toISOString(),
-      level,
-      category,
-      message,
-      details ? JSON.stringify(details) : null
-    )
+    stmt.run(timestamp, level, category, message, detailsStr)
   } catch (e: any) {
-    console.error('写入调试日志失败:', e.message)
+    console.error('[DEBUG_LOG_ERROR] 写入调试日志失败:', e.message)
   }
 
   const colors: Record<string, string> = {
@@ -283,6 +280,15 @@ function debugLog(level: 'INFO' | 'WARN' | 'ERROR' | 'SUCCESS', category: string
   }
   const reset = '\x1b[0m'
   console.log(`${colors[level] || ''}[${level}]${reset} [${category}] ${message}`)
+}
+
+// Write a debug log entry (non-blocking wrapper for reliability)
+function writeDebugLog(level: 'INFO' | 'WARN' | 'ERROR' | 'SUCCESS', category: string, message: string, details: any = null) {
+  try {
+    debugLog(level, category, message, details)
+  } catch (e: any) {
+    console.error('[DEBUG_LOG_ERROR] debugLog调用失败:', e.message)
+  }
 }
 
 function log(message: string) {
@@ -329,6 +335,7 @@ let lastAddPositionTime = 0
 // Trailing Stop State
 let trailingActive = false
 let highestPrice = 0
+let lowestPrice = 0
 let trailingTP = 0
 
 // Signal history
@@ -401,7 +408,7 @@ async function closeLong(price: number, size: number): Promise<boolean> {
       price: String(price),
       size: String(Math.abs(size)),
     }
-    
+
     const result = await futuresApi.createFuturesOrder(order)
     debugLog('SUCCESS', 'TRADE', `平多成功: ${size} @ ${price}`, result.body)
     return true
@@ -412,14 +419,57 @@ async function closeLong(price: number, size: number): Promise<boolean> {
   }
 }
 
+async function openShort(price: number, size: number): Promise<boolean> {
+  try {
+    const settings = loadTradingSettings()
+    const order = {
+      contract: CONFIG.symbol,
+      type: 'sell',  // 开空 = 卖出
+      price: String(price),
+      size: String(Math.abs(size)),
+      leverage: String(settings.leverage),
+    }
+
+    const result = await futuresApi.createFuturesOrder(order)
+    debugLog('SUCCESS', 'TRADE', `开空成功: ${size} @ ${price}`, result.body)
+    return true
+  } catch (e: any) {
+    const msg = e.response?.body?.message || e.message
+    debugLog('ERROR', 'TRADE', `开空失败: ${msg}`)
+    return false
+  }
+}
+
+async function closeShort(price: number, size: number): Promise<boolean> {
+  try {
+    const order = {
+      contract: CONFIG.symbol,
+      type: 'buy',  // 平空 = 买入
+      price: String(price),
+      size: String(Math.abs(size)),
+    }
+
+    const result = await futuresApi.createFuturesOrder(order)
+    debugLog('SUCCESS', 'TRADE', `平空成功: ${size} @ ${price}`, result.body)
+    return true
+  } catch (e: any) {
+    const msg = e.response?.body?.message || e.message
+    debugLog('ERROR', 'TRADE', `平空失败: ${msg}`)
+    return false
+  }
+}
+
 async function getCandlesticks(interval: string = '15m', limit: number = 100) {
   try {
     const url = `https://api.gateio.ws/api/v4/futures/usdt/candlesticks?contract=BTC_USDT&interval=${interval}&limit=${limit}`
-    
+
     const response = await fetch(url)
     const data = await response.json()
-    
+
     if (Array.isArray(data)) {
+      if (data.length === 0) {
+        debugLog('WARN', 'API', `K线数据为空: ${url}`)
+      }
       return data.map((k: any) => ({
         time: k.t,
         open: parseFloat(k.o),
@@ -429,6 +479,9 @@ async function getCandlesticks(interval: string = '15m', limit: number = 100) {
         volume: parseFloat(k.v),
       }))
     }
+
+    // API returned non-array response (可能API错误或限流)
+    debugLog('ERROR', 'API', `K线数据格式错误: 期望数组, 收到 ${typeof data}${data?.message ? ', 消息: ' + data.message : ''}`)
     return []
   } catch (e: any) {
     debugLog('ERROR', 'API', `获取K线失败: ${e.message}`)
@@ -812,6 +865,7 @@ function resetDCAState() {
 function resetTrailingState() {
   trailingActive = false
   highestPrice = 0
+  lowestPrice = 0
   trailingTP = 0
   log('[TrendBot] 追踪止损状态已重置')
 }
@@ -889,21 +943,101 @@ async function tradeCycle() {
     }
 
     if (!currentPrice) {
+      debugLog('WARN', 'CYCLE', '无法获取当前价格')
       log('[TrendBot] 无法获取当前价格')
       return
     }
 
+    // Log trade cycle start with key data
+    debugLog('INFO', 'CYCLE', `交易周期开始: 价格=${currentPrice}, 持仓=${position?.size || 0}, 余额=${balance?.available?.toFixed(2) || 'N/A'}`)
+
     const signals = await detectSignals()
+
+    // Log if candle data is insufficient
+    if (signals.reason.includes('K线数据不足')) {
+      debugLog('WARN', 'SIGNAL', `K线数据不足，无法生成可靠信号: ${signals.reason.join(', ')}`)
+    } else {
+      debugLog('INFO', 'SIGNAL', `信号详情: RSI=${signals.rsi.toFixed(1)}, ADX=${signals.adx.toFixed(1)}, 趋势强度=${signals.strength}, 买=${signals.buy}, 卖=${signals.sell}`)
+    }
+
     log(`[TrendBot] 价格: $${currentPrice}, RSI: ${signals.rsi.toFixed(1)}, BollingerB: ${signals.bollingerB.toFixed(2)}, Stoch: ${signals.stochK.toFixed(1)}/${signals.stochD.toFixed(1)}, ADX: ${signals.adx.toFixed(1)}, 信号: ${signals.buy ? '买入' : signals.sell ? '卖出' : '观望'}`)
 
     // Calculate PnL
     let pnlPercent = null
+    const isLong = position && position.size > 0
+    const isShort = position && position.size < 0
     if (position && position.size !== 0 && position.entry_price) {
-      pnlPercent = (currentPrice - position.entry_price) / position.entry_price * 100
+      if (isLong) {
+        pnlPercent = (currentPrice - position.entry_price) / position.entry_price * 100
+      } else if (isShort) {
+        // Short position: profit when price goes down
+        pnlPercent = (position.entry_price - currentPrice) / position.entry_price * 100
+      }
     }
 
     // Handle existing position
-    if (position && position.size > 0) {
+    if (isShort) {
+      // ============ Handle Short Position ============
+      // Stop loss: price went up beyond threshold (we lose when shorting)
+      if (pnlPercent !== null && pnlPercent <= -CONFIG.stopLossPercent) {
+        log(`[TrendBot] 做空触发止损! 亏损${pnlPercent.toFixed(2)}%`)
+        if (canTrade()) {
+          await closeShort(currentPrice, Math.abs(position.size))
+          recordTrade('close', 'short', position.size, currentPrice, `止损(${pnlPercent.toFixed(2)}%)`, pnlPercent)
+          signalHistory.lastTradeTime = Date.now()
+          resetTrailingState()
+        }
+        return
+      }
+
+      // Take profit check - activate trailing stop when profit reaches initialTP
+      if (pnlPercent !== null && pnlPercent >= CONFIG.initialTP && !trailingActive) {
+        trailingActive = true
+        lowestPrice = currentPrice
+        trailingTP = currentPrice + (currentPrice * CONFIG.trailingPercent / 100)
+        log(`[TrendBot] 做空激活追踪止损! 盈利${pnlPercent.toFixed(2)}%, 初始追踪价=${trailingTP.toFixed(2)}`)
+      }
+
+      // Trailing stop for short - trailing TP goes up as price goes down
+      if (trailingActive) {
+        // Update lowest price if current price goes below it
+        if (currentPrice < lowestPrice) {
+          lowestPrice = currentPrice
+          log(`[TrendBot] 更新最低价: ${lowestPrice.toFixed(2)}`)
+        }
+
+        // Recalculate trailing TP (price rises to trigger stop)
+        const newTrailingTP = lowestPrice + (lowestPrice * CONFIG.trailingPercent / 100)
+
+        // Ensure trailingTP never goes below maxTrailingTP (as percentage rise from lowest)
+        const maxTPPrice = lowestPrice * (1 + CONFIG.maxTrailingTP / 100)
+        trailingTP = Math.max(newTrailingTP, maxTPPrice)
+
+        // Check if price has risen enough to trigger trailing stop
+        const priceRisePercent = (currentPrice - lowestPrice) / lowestPrice
+        if (priceRisePercent >= CONFIG.trailingPercent / 100) {
+          log(`[TrendBot] 做空触发追踪止损! 涨幅${(priceRisePercent * 100).toFixed(2)}% >= ${CONFIG.trailingPercent}%, 追踪价=${trailingTP.toFixed(2)}`)
+          if (canTrade()) {
+            await closeShort(currentPrice, Math.abs(position.size))
+            recordTrade('close', 'short', position.size, currentPrice, `追踪止损(涨幅${(priceRisePercent * 100).toFixed(2)}%))`, pnlPercent)
+            signalHistory.lastTradeTime = Date.now()
+            resetTrailingState()
+          }
+          return
+        }
+      }
+
+      // Buy signal - close short position
+      if (signals.buy) {
+        log(`[TrendBot] 平空仓: ${Math.abs(position.size)} BTC @ $${currentPrice}`)
+        if (canTrade()) {
+          await closeShort(currentPrice, Math.abs(position.size))
+          recordTrade('close', 'short', position.size, currentPrice, signals.reason.join(' + '), pnlPercent)
+          signalHistory.lastTradeTime = Date.now()
+          resetTrailingState()
+        }
+      }
+    } else if (isLong) {
       // Stop loss check
       if (pnlPercent !== null && pnlPercent <= -CONFIG.stopLossPercent) {
         log(`[TrendBot] 触发止损! 亏损${pnlPercent.toFixed(2)}%`)
@@ -1003,7 +1137,7 @@ async function tradeCycle() {
         }
       }
     } else {
-      // No position - check for buy signal
+      // No position - check for buy or sell signal
       if (signals.buy) {
         const balanceAvail = balance?.available ?? 0
         const positionPercent = calculatePositionPercent(signals.strength, balanceAvail)
@@ -1012,10 +1146,21 @@ async function tradeCycle() {
         if (amount >= 0.01 && canTrade()) {
           log(`[TrendBot] 开多仓: ${amount.toFixed(4)} BTC @ $${currentPrice} (信号强度${signals.strength}, 仓位比例${positionPercent}%)`)
           await openLong(currentPrice, amount)
-          updateDCAState(amount, currentPrice)
           recordTrade('open', 'long', amount, currentPrice, signals.reason.join(' + '))
           signalHistory.lastTradeTime = Date.now()
-          lastAddPositionTime = Date.now()
+          trailingActive = false
+        }
+      } else if (signals.sell) {
+        // Open short position on sell signal
+        const balanceAvail = balance?.available ?? 0
+        const positionPercent = calculatePositionPercent(signals.strength, balanceAvail)
+        const amount = balanceAvail > 0 ? (balanceAvail * (positionPercent / 100) * CONFIG.leverage / currentPrice) : 0
+
+        if (amount >= 0.01 && canTrade()) {
+          log(`[TrendBot] 开空仓: ${amount.toFixed(4)} BTC @ $${currentPrice} (信号强度${signals.strength}, 仓位比例${positionPercent}%)`)
+          await openShort(currentPrice, amount)
+          recordTrade('open', 'short', -amount, currentPrice, signals.reason.join(' + '))
+          signalHistory.lastTradeTime = Date.now()
           trailingActive = false
         }
       }

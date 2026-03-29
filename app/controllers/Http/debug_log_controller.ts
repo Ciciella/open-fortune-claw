@@ -7,15 +7,24 @@ export default class DebugLogController {
     const level = request.qs().level
     const category = request.qs().category
 
-    let sql = 'SELECT * FROM debug_logs ORDER BY id DESC LIMIT ?'
-    const params: any[] = [limit]
+    // Build params in correct order (WHERE conditions first, LIMIT last)
+    const params: any[] = []
+    const conditions: string[] = []
 
-    if (level || category) {
-      const conditions: string[] = []
-      if (level) { conditions.push('level = ?'); params.push(level) }
-      if (category) { conditions.push('category = ?'); params.push(category) }
-      sql = 'SELECT * FROM debug_logs WHERE ' + conditions.join(' AND ') + ' ORDER BY id DESC LIMIT ?'
+    if (level) {
+      conditions.push('level = ?')
+      params.push(level)
     }
+    if (category) {
+      conditions.push('category = ?')
+      params.push(category)
+    }
+
+    let sql = conditions.length > 0
+      ? 'SELECT * FROM debug_logs WHERE ' + conditions.join(' AND ') + ' ORDER BY id DESC LIMIT ?'
+      : 'SELECT * FROM debug_logs ORDER BY id DESC LIMIT ?'
+
+    params.push(limit) // LIMIT always at end
 
     const logs = all(sql, params)
 
