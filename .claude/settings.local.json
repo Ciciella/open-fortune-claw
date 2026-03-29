@@ -25,7 +25,8 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Read(//c/Users/18742/.openclaw/workspace/**)",
-      "Bash(gh repo:*)"
+      "Bash(gh repo:*)",
+      "Bash(find /c/Users/18742/.openclaw/workspace/open-fortune-claw/app -type f -name *.ts)"
     ]
   }
 }
