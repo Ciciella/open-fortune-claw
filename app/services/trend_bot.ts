@@ -871,17 +871,12 @@ async function tradeCycle() {
         return
       }
 
-      // Take profit check
-      if (pnlPercent !== null && pnlPercent >= CONFIG.takeProfitPercent) {
-        log(`[TrendBot] 触发止盈! 盈利${pnlPercent.toFixed(2)}%`)
-        if (canTrade()) {
-          await closeLong(currentPrice, position.size)
-          recordTrade('close', 'long', position.size, currentPrice, `止盈(${pnlPercent.toFixed(2)}%)`, pnlPercent)
-          signalHistory.lastTradeTime = Date.now()
-          resetDCAState()
-          resetTrailingState()
-        }
-        return
+      // Take profit check - activate trailing stop when profit reaches initialTP
+      if (pnlPercent !== null && pnlPercent >= CONFIG.initialTP && !trailingActive) {
+        trailingActive = true
+        highestPrice = currentPrice
+        trailingTP = currentPrice - (currentPrice * CONFIG.trailingPercent / 100)
+        log(`[TrendBot] 激活追踪止损! 盈利${pnlPercent.toFixed(2)}%, 初始追踪价=${trailingTP.toFixed(2)}`)
       }
 
       // DCA check

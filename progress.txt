@@ -41,3 +41,13 @@
 - **Learnings for future iterations:**
   - When adding state reset functions, follow the existing pattern: add the function near related functions (resetDCAState) and call it immediately after the existing reset call
 ---
+
+## 2026-03-30 - US-006
+- What was implemented: Implemented trailing stop activation logic
+  - When profit >= initialTP (default 3%), activates trailing stop instead of immediate take profit
+  - Sets trailingActive = true, highestPrice = currentPrice
+  - Sets initial trailingTP = currentPrice - (currentPrice * trailingPercent / 100)
+- Files changed: app/services/trend_bot.ts
+- **Learnings for future iterations:**
+  - Trailing stop activation replaces the immediate take profit - the bot now trails instead of closing at fixed profit
+---
