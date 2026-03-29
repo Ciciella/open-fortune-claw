@@ -50,6 +50,14 @@ interface Config {
   trailingPercent: number
   minTrailingTP: number
   maxTrailingTP: number
+  // Dynamic position sizing config
+  basePercent: number
+  maxPercent: number
+  minPercent: number
+  signalStrong: number
+  signalWeak: number
+  strongMultiplier: number
+  weakMultiplier: number
   // Internally managed
   leverage: number
 }
@@ -79,6 +87,13 @@ const CONFIG: Config = {
   trailingPercent: 1,
   minTrailingTP: 2,
   maxTrailingTP: 5,
+  basePercent: 10,
+  maxPercent: 20,
+  minPercent: 5,
+  signalStrong: 5,
+  signalWeak: 2,
+  strongMultiplier: 1.5,
+  weakMultiplier: 0.5,
   leverage: 10,
 }
 

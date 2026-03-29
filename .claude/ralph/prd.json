@@ -106,8 +106,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added basePercent, maxPercent, minPercent, signalStrong, signalWeak, strongMultiplier, weakMultiplier"
     },
     {
       "id": "US-009",

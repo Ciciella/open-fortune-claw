@@ -62,3 +62,17 @@
 - **Learnings for future iterations:**
   - The trailing stop check runs before DCA check - this is correct priority since we want to exit before adding more
 ---
+
+## 2026-03-30 - US-008
+- What was implemented: Added dynamic position sizing config parameters
+  - basePercent (number, default 10)
+  - maxPercent (number, default 20)
+  - minPercent (number, default 5)
+  - signalStrong (number, default 5)
+  - signalWeak (number, default 2)
+  - strongMultiplier (number, default 1.5)
+  - weakMultiplier (number, default 0.5)
+- Files changed: app/services/trend_bot.ts
+- **Learnings for future iterations:**
+  - Dynamic position sizing config added - US-009 will implement the actual calculation
+---
