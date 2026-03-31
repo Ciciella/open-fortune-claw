@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "type": "module",
   "description": "Cryptocurrency trading bot system with AdonisJS 7",
-
   "imports": {
     "#services/*": "./app/services/*",
     "#controllers/*": "./app/controllers/*",
@@ -21,6 +20,7 @@
     "@adonisjs/core": "^7.0.0",
     "@adonisjs/cors": "^3.0.0",
     "@adonisjs/validator": "^13.0.0",
+    "better-sqlite3": "^12.8.0",
     "dotenv": "^16.6.1",
     "gate-api": "^7.0.0"
   },

@@ -35,7 +35,8 @@
       "mcp__chrome-devtools__list_pages",
       "WebFetch(domain:leonard-dark-values-surfaces.trycloudflare.com)",
       "Bash(npm list:*)",
-      "Read(//c/Users/18742/.claude/**)"
+      "Read(//c/Users/18742/.claude/**)",
+      "Read(//c/Users/18742/.openclaw/**)"
     ],
     "additionalDirectories": [
       "c:\\Users\\18742\\.claude\\plugins"
