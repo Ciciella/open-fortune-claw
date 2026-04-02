@@ -14,7 +14,9 @@
     "trend:bot": "tsx commands/trend_bot_command.ts",
     "grid:bot": "tsx commands/grid_bot_command.ts",
     "arbitrage:bot": "tsx commands/arbitrage_bot_command.ts",
-    "reset:data": "tsx commands/reset_data_command.ts"
+    "reset:data": "tsx commands/reset_data_command.ts",
+    "test": "node --import=tsx --test tests/*.test.ts",
+    "test:watch": "node --import=tsx --watch --test tests/*.test.ts"
   },
   "dependencies": {
     "@adonisjs/core": "^7.0.0",

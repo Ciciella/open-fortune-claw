@@ -376,39 +376,50 @@ async function getFuturesBalance() {
 async function openLong(price: number, size: number): Promise<boolean> {
   try {
     const settings = loadTradingSettings()
+    // Gate.io futures size is in contracts (1 contract = 1 USDT notional)
+    // Convert BTC amount to contract quantity
+    const contractSize = Math.abs(Math.floor(size * price))
+    if (contractSize < 10) {
+      debugLog('WARN', 'TRADE', `开多订单太小: ${size} BTC (${contractSize} contracts) < 最小10 contracts`)
+      return false
+    }
     const order = {
       contract: CONFIG.symbol,
       type: 'buy',
       price: String(price),
-      size: String(Math.abs(size)),
+      size: String(contractSize),
       leverage: String(settings.leverage),
     }
-    
+
     const result = await futuresApi.createFuturesOrder('usdt', order)
-    debugLog('SUCCESS', 'TRADE', `开多成功: ${size} @ ${price}`, result.body)
+    debugLog('SUCCESS', 'TRADE', `开多成功: ${size} BTC (${contractSize} contracts) @ ${price}`, result.body)
     return true
   } catch (e: any) {
     const msg = e.response?.body?.message || e.message
-    debugLog('ERROR', 'TRADE', `开多失败: ${msg}`)
+    const details = e.response?.body || null
+    debugLog('ERROR', 'TRADE', `开多失败: ${msg}`, details)
     return false
   }
 }
 
 async function closeLong(price: number, size: number): Promise<boolean> {
   try {
+    // Convert BTC amount to contract quantity
+    const contractSize = Math.abs(Math.floor(size * price))
     const order = {
       contract: CONFIG.symbol,
       type: 'sell',
       price: String(price),
-      size: String(Math.abs(size)),
+      size: String(contractSize),
     }
 
     const result = await futuresApi.createFuturesOrder('usdt', order)
-    debugLog('SUCCESS', 'TRADE', `平多成功: ${size} @ ${price}`, result.body)
+    debugLog('SUCCESS', 'TRADE', `平多成功: ${size} BTC (${contractSize} contracts) @ ${price}`, result.body)
     return true
   } catch (e: any) {
     const msg = e.response?.body?.message || e.message
-    debugLog('ERROR', 'TRADE', `平多失败: ${msg}`)
+    const details = e.response?.body || null
+    debugLog('ERROR', 'TRADE', `平多失败: ${msg}`, details)
     return false
   }
 }
@@ -416,39 +427,50 @@ async function closeLong(price: number, size: number): Promise<boolean> {
 async function openShort(price: number, size: number): Promise<boolean> {
   try {
     const settings = loadTradingSettings()
+    // Gate.io futures size is in contracts (1 contract = 1 USDT notional)
+    // Convert BTC amount to contract quantity
+    const contractSize = Math.abs(Math.floor(size * price))
+    if (contractSize < 10) {
+      debugLog('WARN', 'TRADE', `开空订单太小: ${size} BTC (${contractSize} contracts) < 最小10 contracts`)
+      return false
+    }
     const order = {
       contract: CONFIG.symbol,
       type: 'sell',  // 开空 = 卖出
       price: String(price),
-      size: String(Math.abs(size)),
+      size: String(contractSize),
       leverage: String(settings.leverage),
     }
 
     const result = await futuresApi.createFuturesOrder('usdt', order)
-    debugLog('SUCCESS', 'TRADE', `开空成功: ${size} @ ${price}`, result.body)
+    debugLog('SUCCESS', 'TRADE', `开空成功: ${size} BTC (${contractSize} contracts) @ ${price}`, result.body)
     return true
   } catch (e: any) {
     const msg = e.response?.body?.message || e.message
-    debugLog('ERROR', 'TRADE', `开空失败: ${msg}`)
+    const details = e.response?.body || null
+    debugLog('ERROR', 'TRADE', `开空失败: ${msg}`, details)
     return false
   }
 }
 
 async function closeShort(price: number, size: number): Promise<boolean> {
   try {
+    // Convert BTC amount to contract quantity
+    const contractSize = Math.abs(Math.floor(size * price))
     const order = {
       contract: CONFIG.symbol,
       type: 'buy',  // 平空 = 买入
       price: String(price),
-      size: String(Math.abs(size)),
+      size: String(contractSize),
     }
 
     const result = await futuresApi.createFuturesOrder('usdt', order)
-    debugLog('SUCCESS', 'TRADE', `平空成功: ${size} @ ${price}`, result.body)
+    debugLog('SUCCESS', 'TRADE', `平空成功: ${size} BTC (${contractSize} contracts) @ ${price}`, result.body)
     return true
   } catch (e: any) {
     const msg = e.response?.body?.message || e.message
-    debugLog('ERROR', 'TRADE', `平空失败: ${msg}`)
+    const details = e.response?.body || null
+    debugLog('ERROR', 'TRADE', `平空失败: ${msg}`, details)
     return false
   }
 }

@@ -36,7 +36,9 @@
       "WebFetch(domain:leonard-dark-values-surfaces.trycloudflare.com)",
       "Bash(npm list:*)",
       "Read(//c/Users/18742/.claude/**)",
-      "Read(//c/Users/18742/.openclaw/**)"
+      "Read(//c/Users/18742/.openclaw/**)",
+      "Bash(npm test:*)",
+      "Bash(npm remove:*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\18742\\.claude\\plugins"
