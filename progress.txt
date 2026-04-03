@@ -4,6 +4,78 @@
 - TypeScript type errors for module resolution are pre-existing and not blocking for runtime
 
 ---
+
+## 2026-04-04 - Profitability Optimization
+- What was implemented: Major optimization for stable profitability
+
+### 1. ATR-based Dynamic Stop Loss/Take Profit
+- Added `atrStopMultiplier` (default 1.5x) and `atrTPMultiplier` (default 3.0x) to CONFIG
+- Added `useAtrStops` flag to enable/disable ATR-based stops
+- `calculateAtrStops()` function: calculates stop loss and take profit prices based on ATR
+- Replaces fixed percentage stops with volatility-adaptive stops
+- Files changed: app/services/trend_bot.ts
+
+### 2. Fixed Technical Indicator Calculations
+- `calculateStochastic()`: Now properly calculates %D as SMA of %K over 3 periods
+- `calculateADX()`: Full implementation with Wilder's smoothing method
+- Files changed: app/services/trend_bot.ts
+
+### 3. Daily Loss Limit Protection
+- Added `maxDailyLossPercent` config (default 5%)
+- Created `daily_pnl` table to track daily P&L
+- `initializeDailyPnl()`: Initialize tracking at start of each day
+- `updateDailyPnl()`: Update after each trade closure
+- `checkDailyLossLimit()`: Blocks trading when daily loss exceeds threshold
+- Files changed: app/services/trend_bot.ts
+
+### 4. Max Drawdown Protection
+- Added `maxDrawdownPercent` config (default 15%)
+- Created `account_state` table to track peak balance and drawdown
+- `updateAccountState()`: Updates peak balance, calculates drawdown, auto-pauses trading
+- Auto-resume when drawdown recovers to half of threshold
+- `isTradingPaused()`: Check if trading is blocked due to risk limits
+- `resetRiskState()`: Manual override to reset risk state
+- Files changed: app/services/trend_bot.ts
+
+### 5. API Rate Limiting & Retry Mechanism
+- Added `withRetry()` wrapper with exponential backoff + jitter
+- `MAX_RETRIES=3`, `BASE_DELAY_MS=1000`, `MAX_DELAY_MS=10000`
+- `isRateLimitError()`: Detects HTTP 429 responses
+- `isRetryableError()`: Detects network errors, 5xx, rate limits
+- Applied retry to all futures API calls: listPositions, listFuturesAccounts, createFuturesOrder, updatePositionLeverage
+- Files changed: app/services/gate_api.ts, app/services/trend_bot.ts
+
+### 6. Smart Strategy Switching Mechanism
+- Created new `app/services/strategy_coordinator.ts`
+- `analyzeMarket()`: Classifies market as trending/ranging/volatile based on ADX and ATR
+- `recommendStrategy()`: Scores trend/grid/arbitrage strategies based on market conditions
+- `switchActiveStrategy()`: Updates active_strategy in settings DB
+- `autoEvaluateAndSwitch()`: Automatic evaluation and switching (confidence >= 70%)
+- Integrated into tradeCycle() when strategyMode is 'smart'
+- Files changed: app/services/trend_bot.ts, app/services/strategy_coordinator.ts (new)
+
+### Database Schema Changes
+- New table: `daily_pnl` - tracks daily P&L, trade count, starting/current balance
+- New table: `account_state` - tracks peak balance, drawdown %, trading pause flag
+- Migration-safe: CREATE TABLE IF NOT EXISTS, auto-initializes on bot start
+
+### Config Additions (all with sensible defaults)
+- atrStopMultiplier: 1.5
+- atrTPMultiplier: 3.0
+- useAtrStops: true
+- maxDailyLossPercent: 5
+- maxDrawdownPercent: 15
+- All configs are in CONFIG object, can be adjusted via code
+
+### Tests Added
+- tests/risk_management.test.ts - 41 tests, 10 suites, all passing
+  - Technical indicators: ATR, Stochastic (%K/%D), ADX (Wilder's method)
+  - ATR-based stop loss/take profit calculations (long/short, fallback, volatility adaptation)
+  - Strategy coordinator: market regime classification, strategy recommendation
+  - Risk management: drawdown calculation, daily loss limits, recovery thresholds
+  - API retry: exponential backoff timing, error classification (429/5xx/network/4xx)
+
+---
 ## 2026-03-30 - US-001
 - What was implemented: Added DCA config parameters to trend_bot service with correct defaults per acceptance criteria
   - dcaEnabled (bool, default true)

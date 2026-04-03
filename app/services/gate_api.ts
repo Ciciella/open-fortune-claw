@@ -14,6 +14,73 @@ client.setApiKeySecret(config.apiKey, config.apiSecret)
 
 const futuresApi = new FuturesApi(client)
 
+// ============ Rate Limiting & Retry Logic ============
+const MAX_RETRIES = 3
+const BASE_DELAY_MS = 1000
+const MAX_DELAY_MS = 10000
+
+// Sleep utility for retry delays
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+// Exponential backoff with jitter
+function calculateDelay(retryCount: number): number {
+  const exponentialDelay = BASE_DELAY_MS * Math.pow(2, retryCount)
+  const jitter = Math.random() * 500 // Add 0-500ms jitter to prevent thundering herd
+  return Math.min(exponentialDelay + jitter, MAX_DELAY_MS)
+}
+
+// Check if error is rate limit related (HTTP 429)
+function isRateLimitError(error: any): boolean {
+  return error.response?.status === 429 ||
+         error.response?.body?.message?.includes('429') ||
+         error.response?.body?.message?.includes('rate limit')
+}
+
+// Check if error is retryable (network error, timeout, 5xx)
+function isRetryableError(error: any): boolean {
+  if (isRateLimitError(error)) return true
+  if (!error.response) return true // Network error
+  if (error.response.status >= 500) return true // Server error
+  return false
+}
+
+// Wrapper function with automatic retry
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  operationName: string = 'API operation',
+  maxRetries: number = MAX_RETRIES
+): Promise<T> {
+  let lastError: any
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation()
+    } catch (error: any) {
+      lastError = error
+
+      if (!isRetryableError(error) || attempt === maxRetries) {
+        // Not retryable or max retries reached
+        const errorMsg = error.response?.body?.message || error.message || 'Unknown error'
+        console.error(`[API Error] ${operationName} failed after ${attempt + 1} attempts: ${errorMsg}`)
+        throw error
+      }
+
+      const delay = calculateDelay(attempt)
+      const isRateLimit = isRateLimitError(error)
+      console.warn(
+        `[API Retry] ${operationName} - Attempt ${attempt + 1}/${maxRetries} failed` +
+        (isRateLimit ? ' (Rate Limited)' : '') +
+        `, retrying in ${Math.round(delay)}ms...`
+      )
+      await sleep(delay)
+    }
+  }
+
+  throw lastError
+}
+
 export interface Position {
   symbol: string
   side: 'long' | 'short'
@@ -39,8 +106,11 @@ export interface GateApiResult {
 
 export async function fetchPositionsAndBalance(): Promise<GateApiResult> {
   try {
-    // 获取持仓
-    const positionsResult = await futuresApi.listPositions('usdt')
+    // Get positions with retry
+    const positionsResult = await withRetry(
+      () => futuresApi.listPositions('usdt'),
+      'listPositions'
+    )
     const posList = Array.isArray(positionsResult.body) ? positionsResult.body : []
 
     const positions: Position[] = posList
@@ -56,8 +126,11 @@ export async function fetchPositionsAndBalance(): Promise<GateApiResult> {
         updated_at: new Date().toISOString()
       }))
 
-    // 获取账户余额
-    const accounts = await futuresApi.listFuturesAccounts('usdt')
+    // Get balance with retry
+    const accounts = await withRetry(
+      () => futuresApi.listFuturesAccounts('usdt'),
+      'listFuturesAccounts'
+    )
     const balance: Balance = {
       total: parseFloat(String(accounts.body.total || '0')),
       available: parseFloat(String(accounts.body.available || '0')),
@@ -76,4 +149,4 @@ export async function fetchPositionsAndBalance(): Promise<GateApiResult> {
   }
 }
 
-export { futuresApi }
+export { futuresApi, withRetry }

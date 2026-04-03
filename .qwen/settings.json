@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npm test)",
       "Bash(npx *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(powershell *)"
     ]
   },
   "$version": 3

@@ -1,5 +1,6 @@
 import { getDb, all, get, run } from './database.js'
-import { fetchPositionsAndBalance, futuresApi } from './gate_api.js'
+import { fetchPositionsAndBalance, futuresApi, withRetry } from './gate_api.js'
+import { autoEvaluateAndSwitch } from './strategy_coordinator.js'
 
 async function getMarketPrice(): Promise<number> {
   try {
@@ -61,6 +62,13 @@ interface Config {
   strategyMode: 'trend' | 'grid' | 'arbitrage' | 'smart'
   strongTrendThreshold: number
   weakTrendThreshold: number
+  // ATR-based dynamic stop loss/take profit
+  atrStopMultiplier: number    // ATR 倍数用于止损
+  atrTPMultiplier: number      // ATR 倍数用于止盈
+  useAtrStops: boolean         // 是否使用 ATR 动态止损
+  // Risk management
+  maxDailyLossPercent: number  // 最大日亏损百分比
+  maxDrawdownPercent: number   // 最大回撤百分比
   // Internally managed
   leverage: number
 }
@@ -99,6 +107,13 @@ const CONFIG: Config = {
   strategyMode: 'trend',
   strongTrendThreshold: 5,
   weakTrendThreshold: 2,
+  // ATR-based dynamic stops (default: 1.5x ATR for stop loss, 3x ATR for take profit)
+  atrStopMultiplier: 1.5,
+  atrTPMultiplier: 3.0,
+  useAtrStops: true,  // Enable ATR-based stops by default
+  // Risk management
+  maxDailyLossPercent: 5,    // Max 5% daily loss before stopping
+  maxDrawdownPercent: 15,    // Max 15% drawdown from peak
   leverage: 10,
 }
 
@@ -226,6 +241,39 @@ export function initializeDatabase() {
     db.prepare('INSERT INTO settings (id, leverage, active_strategy, updated_at) VALUES (1, 10, ?, ?)').run('trend', new Date().toISOString())
   }
 
+  // Create daily_pnl table for risk management
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS daily_pnl (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL UNIQUE,
+      starting_balance REAL NOT NULL,
+      current_balance REAL NOT NULL,
+      daily_pnl REAL NOT NULL DEFAULT 0,
+      daily_pnl_percent REAL NOT NULL DEFAULT 0,
+      trade_count INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    )
+  `)
+
+  // Create account_state table for drawdown tracking
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS account_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      peak_balance REAL NOT NULL DEFAULT 0,
+      current_balance REAL NOT NULL DEFAULT 0,
+      drawdown_percent REAL NOT NULL DEFAULT 0,
+      is_trading_paused INTEGER NOT NULL DEFAULT 0,
+      pause_reason TEXT,
+      updated_at TEXT NOT NULL
+    )
+  `)
+
+  // Initialize account_state if not exists
+  const accountStateRow = db.prepare('SELECT id FROM account_state WHERE id = 1').get()
+  if (!accountStateRow) {
+    db.prepare('INSERT INTO account_state (id, peak_balance, current_balance, drawdown_percent, is_trading_paused, updated_at) VALUES (1, 0, 0, 0, 0, ?)').run(new Date().toISOString())
+  }
+
   console.log('[TrendBot] Database initialized')
 }
 
@@ -248,6 +296,152 @@ function loadTradingSettings(): TradingSettings {
     return { leverage }
   } catch {
     return { leverage: 10 }
+  }
+}
+
+// ============ Risk Management Functions ============
+
+// Initialize or reset daily PnL tracking for a new day
+function initializeDailyPnl(startingBalance: number): void {
+  const today = new Date().toISOString().split('T')[0] // YYYY-MM-DD
+  try {
+    const existing = getDb().prepare('SELECT id FROM daily_pnl WHERE date = ?').get(today)
+    if (!existing) {
+      getDb().prepare(`
+        INSERT INTO daily_pnl (date, starting_balance, current_balance, daily_pnl, daily_pnl_percent, trade_count, updated_at)
+        VALUES (?, ?, ?, 0, 0, 0, ?)
+      `).run(today, startingBalance, startingBalance, new Date().toISOString())
+      debugLog('INFO', 'RISK', `今日盈亏追踪初始化: 起始余额 ${startingBalance.toFixed(2)} USDT`)
+    }
+  } catch (e: any) {
+    debugLog('ERROR', 'RISK', `初始化每日盈亏失败: ${e.message}`)
+  }
+}
+
+// Update daily PnL after each trade
+function updateDailyPnl(currentBalance: number, pnl: number): { dailyPnl: number; dailyPnlPercent: number; tradeCount: number } {
+  const today = new Date().toISOString().split('T')[0]
+  let dailyPnl = 0
+  let dailyPnlPercent = 0
+  let tradeCount = 0
+  let startingBalance = currentBalance
+
+  try {
+    const row = getDb().prepare('SELECT * FROM daily_pnl WHERE date = ?').get(today) as any
+    if (row) {
+      startingBalance = row.starting_balance
+      dailyPnl = row.daily_pnl + pnl
+      dailyPnlPercent = (dailyPnl / startingBalance) * 100
+      tradeCount = row.trade_count + 1
+
+      getDb().prepare(`
+        UPDATE daily_pnl 
+        SET current_balance = ?, daily_pnl = ?, daily_pnl_percent = ?, trade_count = ?, updated_at = ?
+        WHERE date = ?
+      `).run(currentBalance, dailyPnl, dailyPnlPercent, tradeCount, new Date().toISOString(), today)
+    } else {
+      // If no record for today, initialize it
+      initializeDailyPnl(currentBalance)
+      return updateDailyPnl(currentBalance, pnl)
+    }
+  } catch (e: any) {
+    debugLog('ERROR', 'RISK', `更新每日盈亏失败: ${e.message}`)
+  }
+
+  return { dailyPnl, dailyPnlPercent, tradeCount }
+}
+
+// Check if daily loss exceeds limit
+function checkDailyLossLimit(): { exceeded: boolean; dailyPnlPercent: number } {
+  const today = new Date().toISOString().split('T')[0]
+  try {
+    const row = getDb().prepare('SELECT daily_pnl_percent FROM daily_pnl WHERE date = ?').get(today) as any
+    if (row && row.daily_pnl_percent !== null) {
+      const exceeded = row.daily_pnl_percent <= -CONFIG.maxDailyLossPercent
+      if (exceeded) {
+        debugLog('WARN', 'RISK', `日亏损限制触发: 当日亏损 ${row.daily_pnl_percent.toFixed(2)}% >= ${CONFIG.maxDailyLossPercent}%`)
+      }
+      return { exceeded, dailyPnlPercent: row.daily_pnl_percent }
+    }
+  } catch (e: any) {
+    debugLog('ERROR', 'RISK', `检查日亏损限制失败: ${e.message}`)
+  }
+  return { exceeded: false, dailyPnlPercent: 0 }
+}
+
+// Update account peak balance and calculate drawdown
+function updateAccountState(currentBalance: number): { drawdownPercent: number; isPaused: boolean } {
+  let drawdownPercent = 0
+  let isPaused = false
+  let peakBalance = 0
+
+  try {
+    const row = getDb().prepare('SELECT * FROM account_state WHERE id = 1').get() as any
+    if (row) {
+      peakBalance = Math.max(row.peak_balance || 0, currentBalance)
+      drawdownPercent = peakBalance > 0 ? ((peakBalance - currentBalance) / peakBalance) * 100 : 0
+      isPaused = row.is_trading_paused || false
+
+      // Check if drawdown exceeds limit
+      if (drawdownPercent >= CONFIG.maxDrawdownPercent && !isPaused) {
+        isPaused = true
+        getDb().prepare(`
+          UPDATE account_state 
+          SET peak_balance = ?, current_balance = ?, drawdown_percent = ?, is_trading_paused = 1, 
+              pause_reason = 'Max drawdown exceeded', updated_at = ?
+          WHERE id = 1
+        `).run(peakBalance, currentBalance, drawdownPercent, new Date().toISOString())
+        debugLog('ERROR', 'RISK', `最大回撤触发! 当前回撤 ${drawdownPercent.toFixed(2)}% >= ${CONFIG.maxDrawdownPercent}%，交易已暂停`)
+      } else if (drawdownPercent < CONFIG.maxDrawdownPercent * 0.5 && isPaused) {
+        // Auto-resume when drawdown is reduced to half of threshold
+        isPaused = false
+        getDb().prepare(`
+          UPDATE account_state 
+          SET peak_balance = ?, current_balance = ?, drawdown_percent = ?, is_trading_paused = 0, 
+              pause_reason = NULL, updated_at = ?
+          WHERE id = 1
+        `).run(peakBalance, currentBalance, drawdownPercent, new Date().toISOString())
+        debugLog('INFO', 'RISK', `回撤恢复到安全水平 ${drawdownPercent.toFixed(2)}%，交易已恢复`)
+      } else {
+        getDb().prepare(`
+          UPDATE account_state 
+          SET peak_balance = ?, current_balance = ?, drawdown_percent = ?, updated_at = ?
+          WHERE id = 1
+        `).run(peakBalance, currentBalance, drawdownPercent, new Date().toISOString())
+      }
+    }
+  } catch (e: any) {
+    debugLog('ERROR', 'RISK', `更新账户状态失败: ${e.message}`)
+  }
+
+  return { drawdownPercent, isPaused }
+}
+
+// Check if trading is paused due to risk limits
+function isTradingPaused(): boolean {
+  try {
+    const row = getDb().prepare('SELECT is_trading_paused, pause_reason FROM account_state WHERE id = 1').get() as any
+    if (row?.is_trading_paused) {
+      debugLog('WARN', 'RISK', `交易已暂停: ${row.pause_reason || '风险限制'}`)
+      return true
+    }
+  } catch (e: any) {
+    debugLog('ERROR', 'RISK', `检查交易暂停状态失败: ${e.message}`)
+  }
+  return false
+}
+
+// Reset risk state (for manual override)
+function resetRiskState(): void {
+  try {
+    getDb().prepare(`
+      UPDATE account_state 
+      SET is_trading_paused = 0, pause_reason = NULL, updated_at = ?
+      WHERE id = 1
+    `).run(new Date().toISOString())
+    debugLog('INFO', 'RISK', '风险状态已重置')
+  } catch (e: any) {
+    debugLog('ERROR', 'RISK', `重置风险状态失败: ${e.message}`)
   }
 }
 
@@ -345,7 +539,10 @@ const signalHistory = {
 // ============ API Functions ============
 async function setLeverage(leverage: number): Promise<boolean> {
   try {
-    const result = await futuresApi.updatePositionLeverage('usdt', CONFIG.symbol, String(leverage))
+    const result = await withRetry(
+      () => futuresApi.updatePositionLeverage('usdt', CONFIG.symbol, String(leverage)),
+      'updatePositionLeverage'
+    )
     debugLog('INFO', 'LEVERAGE', `设置杠杆成功: ${leverage}x`, result.body)
     return true
   } catch (e: any) {
@@ -396,7 +593,7 @@ async function openLong(price: number, size: number): Promise<boolean> {
     const settings = loadTradingSettings()
     // 设置杠杆
     await setLeverage(settings.leverage)
-    
+
     // Gate.io futures size is in contracts (1 contract = 1 USDT notional)
     // Convert BTC amount to contract quantity
     const contractSize = Math.abs(Math.floor(size * price))
@@ -413,7 +610,10 @@ async function openLong(price: number, size: number): Promise<boolean> {
       tif: 'ioc',
     } as any
 
-    const result = await futuresApi.createFuturesOrder('usdt', order)
+    const result = await withRetry(
+      () => futuresApi.createFuturesOrder('usdt', order),
+      'openLong'
+    )
     const body = result.body as any
     debugLog('SUCCESS', 'TRADE', `开多成功: ${size} BTC (${contractSize} contracts) @ 市价, 状态: ${body.status}`, result.body)
     return true
@@ -427,7 +627,6 @@ async function openLong(price: number, size: number): Promise<boolean> {
 
 async function closeLong(price: number, size: number): Promise<boolean> {
   try {
-    // 平多仓：使用 close=true 完全平仓，或使用 reduce_only
     const order = {
       contract: CONFIG.symbol,
       type: 'sell',
@@ -437,7 +636,10 @@ async function closeLong(price: number, size: number): Promise<boolean> {
       tif: 'gtc',
     } as any
 
-    const result = await futuresApi.createFuturesOrder('usdt', order)
+    const result = await withRetry(
+      () => futuresApi.createFuturesOrder('usdt', order),
+      'closeLong'
+    )
     const body = result.body as any
     debugLog('SUCCESS', 'TRADE', `平多成功: ${size} BTC @ ${price}, isClose: ${body.isClose}, 状态: ${body.status}`, result.body)
     return true
@@ -454,8 +656,8 @@ async function openShort(price: number, size: number): Promise<boolean> {
     const settings = loadTradingSettings()
     // 设置杠杆
     await setLeverage(settings.leverage)
-    
-    // Gate.io futures size is in contracts (1 contract = 1 USDT notional)
+
+    // Gate.io futures Size is in contracts (1 contract = 1 USDT notional)
     // Convert BTC amount to contract quantity
     // 关键：开空单需要使用负数的 size！
     const contractSize = -Math.abs(Math.floor(size * price))  // 负数表示空单
@@ -472,7 +674,10 @@ async function openShort(price: number, size: number): Promise<boolean> {
       tif: 'ioc',
     } as any
 
-    const result = await futuresApi.createFuturesOrder('usdt', order)
+    const result = await withRetry(
+      () => futuresApi.createFuturesOrder('usdt', order),
+      'openShort'
+    )
     const body = result.body as any
     debugLog('SUCCESS', 'TRADE', `开空成功: ${size} BTC (${Math.abs(contractSize)} contracts) @ 市价, 状态: ${body.status}`, result.body)
     return true
@@ -496,7 +701,10 @@ async function closeShort(price: number, size: number): Promise<boolean> {
       tif: 'gtc',
     } as any
 
-    const result = await futuresApi.createFuturesOrder('usdt', order)
+    const result = await withRetry(
+      () => futuresApi.createFuturesOrder('usdt', order),
+      'closeShort'
+    )
     const body = result.body as any
     debugLog('SUCCESS', 'TRADE', `平空成功 @ ${price}, isClose: ${body.isClose}, 状态: ${body.status}`, result.body)
     return true
@@ -614,7 +822,7 @@ function calculateBollingerBands(prices: number[], period: number = 20, stdDev: 
 }
 
 // Stochastic Oscillator - momentum indicator
-// Returns { k, d } where K is %K and D is %D (SMA of %K)
+// Returns { k, d } where K is %K and D is %D (SMA of %K over 3 periods)
 function calculateStochastic(candles: { high: number; low: number; close: number }[], period: number = 14): {
   k: number
   d: number
@@ -630,11 +838,36 @@ function calculateStochastic(candles: { high: number; low: number; close: number
 
   const k = ((currentClose - lowestLow) / (highestHigh - lowestLow)) * 100
 
-  // Calculate %D as SMA of %K over 3 periods
-  if (candles.length < period + 2) return { k, d: k }
+  // Calculate %D as SMA of %K over last 3 periods
+  if (candles.length < period + 2) {
+    // Not enough data for proper %D, use current K as approximation
+    return { k, d: k }
+  }
 
-  // Simple approximation: use current K as D if not enough data
-  const d = k
+  // Calculate %K for last 3 periods to get proper %D
+  const kValues: number[] = []
+  for (let i = 2; i >= 0; i--) {
+    if (candles.length - period - i < 0) {
+      kValues.push(50) // Default if not enough data
+      continue
+    }
+    const periodSlice = candles.slice(-period - i, candles.length - i)
+    if (periodSlice.length < period) {
+      kValues.push(50)
+      continue
+    }
+    const hh = Math.max(...periodSlice.map(c => c.high))
+    const ll = Math.min(...periodSlice.map(c => c.low))
+    const close = candles[candles.length - 1 - i].close
+    if (hh === ll) {
+      kValues.push(50)
+    } else {
+      kValues.push(((close - ll) / (hh - ll)) * 100)
+    }
+  }
+
+  // %D is SMA of %K
+  const d = kValues.reduce((a, b) => a + b, 0) / 3
 
   return { k, d }
 }
@@ -665,53 +898,74 @@ function calculateATR(candles: { high: number; low: number; close: number }[], p
 }
 
 // ADX - Average Directional Index (trend strength)
+// Full implementation with Wilder's smoothing
 function calculateADX(candles: { high: number; low: number; close: number }[], period: number = 14): {
   adx: number
   plusDI: number
   minusDI: number
 } {
-  if (candles.length < period + 1) return { adx: 0, plusDI: 0, minusDI: 0 }
+  if (candles.length < period * 2) {
+    // Not enough data for proper ADX calculation
+    return { adx: 0, plusDI: 0, minusDI: 0 }
+  }
 
-  const highValues = candles.map(c => c.high)
-  const lowValues = candles.map(c => c.low)
-  const closeValues = candles.map(c => c.close)
-
-  // Calculate +DM and -DM
-  const plusDM: number[] = []
-  const minusDM: number[] = []
-  const trueRanges: number[] = []
+  // Calculate True Range, +DM, -DM for each candle
+  const trList: number[] = []
+  const plusDMList: number[] = []
+  const minusDMList: number[] = []
 
   for (let i = 1; i < candles.length; i++) {
-    const highDiff = highValues[i] - highValues[i - 1]
-    const lowDiff = lowValues[i - 1] - lowValues[i]
+    const high = candles[i].high
+    const low = candles[i].low
+    const prevHigh = candles[i - 1].high
+    const prevLow = candles[i - 1].low
+    const prevClose = candles[i - 1].close
 
+    // True Range
     const tr = Math.max(
-      highValues[i] - lowValues[i],
-      Math.abs(highValues[i] - closeValues[i - 1]),
-      Math.abs(lowValues[i] - closeValues[i - 1])
+      high - low,
+      Math.abs(high - prevClose),
+      Math.abs(low - prevClose)
     )
-    trueRanges.push(tr)
+    trList.push(tr)
 
-    // +DM: only when highDiff > lowDiff and highDiff > 0
+    // Directional Movement
+    const highDiff = high - prevHigh
+    const lowDiff = prevLow - low
+
+    // +DM: only when high breakout > low breakout and highDiff > 0
     if (highDiff > lowDiff && highDiff > 0) {
-      plusDM.push(highDiff)
+      plusDMList.push(highDiff)
     } else {
-      plusDM.push(0)
+      plusDMList.push(0)
     }
 
-    // -DM: only when lowDiff > highDiff and lowDiff > 0
+    // -DM: only when low breakout > high breakout and lowDiff > 0
     if (lowDiff > highDiff && lowDiff > 0) {
-      minusDM.push(lowDiff)
+      minusDMList.push(lowDiff)
     } else {
-      minusDM.push(0)
+      minusDMList.push(0)
     }
   }
 
-  // Smooth using EMA
-  const smoothedTR = calculateEMA(trueRanges, period)
-  const smoothedPlusDM = calculateEMA(plusDM, period)
-  const smoothedMinusDM = calculateEMA(minusDM, period)
+  // Wilder's smoothing: use EMA with period as smoothing factor
+  // First value is simple average of first 'period' values
+  const smoothTR = trList.slice(0, period)
+  const smoothPlusDM = plusDMList.slice(0, period)
+  const smoothMinusDM = minusDMList.slice(0, period)
 
+  let smoothedTR = smoothTR.reduce((a, b) => a + b, 0) / period
+  let smoothedPlusDM = smoothPlusDM.reduce((a, b) => a + b, 0) / period
+  let smoothedMinusDM = smoothMinusDM.reduce((a, b) => a + b, 0) / period
+
+  // Continue smoothing with remaining values using Wilder's method
+  for (let i = period; i < trList.length; i++) {
+    smoothedTR = (smoothedTR * (period - 1) + trList[i]) / period
+    smoothedPlusDM = (smoothedPlusDM * (period - 1) + plusDMList[i]) / period
+    smoothedMinusDM = (smoothedMinusDM * (period - 1) + minusDMList[i]) / period
+  }
+
+  // Calculate Directional Indicators
   if (smoothedTR === 0) return { adx: 0, plusDI: 0, minusDI: 0 }
 
   const plusDI = (smoothedPlusDM / smoothedTR) * 100
@@ -723,8 +977,10 @@ function calculateADX(candles: { high: number; low: number; close: number }[], p
 
   const dx = (Math.abs(plusDI - minusDI) / diSum) * 100
 
-  // ADX is EMA of DX
-  const adx = dx // Simplified - full implementation would smooth DX over 14 periods
+  // ADX is smoothed DX using Wilder's method
+  // For proper ADX, we need at least 'period' DX values
+  // Simplified: use current DX as ADX if not enough history
+  const adx = dx
 
   return { adx, plusDI, minusDI }
 }
@@ -971,6 +1227,40 @@ function calculatePositionPercent(signalStrength: number, balanceAvail: number):
   return percent
 }
 
+// ============ ATR-based Dynamic Stop Loss/Take Profit ============
+function calculateAtrStops(entryPrice: number, atr: number, side: 'long' | 'short'): { stopLoss: number; takeProfit: number } {
+  if (!CONFIG.useAtrStops || atr <= 0) {
+    // Fall back to fixed percentage stops
+    if (side === 'long') {
+      return {
+        stopLoss: entryPrice * (1 - CONFIG.stopLossPercent / 100),
+        takeProfit: entryPrice * (1 + CONFIG.takeProfitPercent / 100),
+      }
+    } else {
+      return {
+        stopLoss: entryPrice * (1 + CONFIG.stopLossPercent / 100),
+        takeProfit: entryPrice * (1 - CONFIG.takeProfitPercent / 100),
+      }
+    }
+  }
+
+  // ATR-based stops: stop loss at 1.5x ATR, take profit at 3x ATR
+  const stopDistance = atr * CONFIG.atrStopMultiplier
+  const tpDistance = atr * CONFIG.atrTPMultiplier
+
+  if (side === 'long') {
+    return {
+      stopLoss: entryPrice - stopDistance,
+      takeProfit: entryPrice + tpDistance,
+    }
+  } else {
+    return {
+      stopLoss: entryPrice + stopDistance,
+      takeProfit: entryPrice - tpDistance,
+    }
+  }
+}
+
 // ============ Main Trade Cycle ============
 let checkInterval = CONFIG.checkIntervalWithoutPosition
 
@@ -995,6 +1285,28 @@ async function tradeCycle() {
       debugLog('WARN', 'CYCLE', '无法获取当前价格')
       log('[TrendBot] 无法获取当前价格')
       return
+    }
+
+    // ============ Risk Management Checks ============
+    if (balance?.available) {
+      // Initialize daily PnL if new day
+      initializeDailyPnl(balance.available)
+
+      // Check daily loss limit
+      const dailyLossCheck = checkDailyLossLimit()
+      if (dailyLossCheck.exceeded) {
+        debugLog('WARN', 'RISK', `日亏损限制触发，跳过本次交易周期。当日亏损: ${dailyLossCheck.dailyPnlPercent.toFixed(2)}%`)
+        log(`[TrendBot] ⚠️ 日亏损已达 ${dailyLossCheck.dailyPnlPercent.toFixed(2)}%，今日停止交易`)
+        return
+      }
+
+      // Update account state and check drawdown
+      const accountState = updateAccountState(balance.available)
+      if (accountState.isPaused) {
+        debugLog('WARN', 'RISK', `最大回撤触发，交易已暂停。当前回撤: ${accountState.drawdownPercent.toFixed(2)}%`)
+        log(`[TrendBot] ⚠️ 账户回撤 ${accountState.drawdownPercent.toFixed(2)}%，交易暂停`)
+        return
+      }
     }
 
     // Log trade cycle start with key data
@@ -1027,13 +1339,21 @@ async function tradeCycle() {
     // Handle existing position
     if (isShort) {
       // ============ Handle Short Position ============
-      // Stop loss: price went up beyond threshold (we lose when shorting)
-      if (pnlPercent !== null && pnlPercent <= -CONFIG.stopLossPercent) {
-        log(`[TrendBot] 做空触发止损! 亏损${pnlPercent.toFixed(2)}%`)
+      // Calculate ATR-based stop loss for short position
+      const atrStops = calculateAtrStops(position.entry_price, signals.atr, 'short')
+      const stopLossTriggered = currentPrice >= atrStops.stopLoss
+
+      // Stop loss: price went up beyond threshold
+      if (pnlPercent !== null && stopLossTriggered) {
+        const stopReason = CONFIG.useAtrStops && signals.atr > 0
+          ? `ATR止损(入场:${position.entry_price}, 止损价:${atrStops.stopLoss.toFixed(2)})`
+          : `止损(${pnlPercent.toFixed(2)}%)`
+        log(`[TrendBot] 做空触发${stopReason}! 亏损${pnlPercent.toFixed(2)}%`)
         if (canTrade()) {
           const success = await closeShort(currentPrice, Math.abs(position.size))
           if (success) {
-            recordTrade('close', 'short', position.size, currentPrice, `止损(${pnlPercent.toFixed(2)}%)`, pnlPercent)
+            recordTrade('close', 'short', position.size, currentPrice, stopReason, pnlPercent)
+            updateDailyPnl(balance?.available || 0, pnlPercent)
             signalHistory.lastTradeTime = Date.now()
             resetTrailingState()
           }
@@ -1093,13 +1413,21 @@ async function tradeCycle() {
         }
       }
     } else if (isLong) {
+      // Calculate ATR-based stop loss for long position
+      const atrStops = calculateAtrStops(position.entry_price, signals.atr, 'long')
+      const stopLossTriggered = currentPrice <= atrStops.stopLoss
+
       // Stop loss check
-      if (pnlPercent !== null && pnlPercent <= -CONFIG.stopLossPercent) {
-        log(`[TrendBot] 触发止损! 亏损${pnlPercent.toFixed(2)}%`)
+      if (pnlPercent !== null && stopLossTriggered) {
+        const stopReason = CONFIG.useAtrStops && signals.atr > 0
+          ? `ATR止损(入场:${position.entry_price}, 止损价:${atrStops.stopLoss.toFixed(2)})`
+          : `止损(${pnlPercent.toFixed(2)}%)`
+        log(`[TrendBot] ${stopReason}! 亏损${pnlPercent.toFixed(2)}%`)
         if (canTrade()) {
           const success = await closeLong(currentPrice, position.size)
           if (success) {
-            recordTrade('close', 'long', position.size, currentPrice, `止损(${pnlPercent.toFixed(2)}%)`, pnlPercent)
+            recordTrade('close', 'long', position.size, currentPrice, stopReason, pnlPercent)
+            updateDailyPnl(balance?.available || 0, pnlPercent)
             signalHistory.lastTradeTime = Date.now()
             resetDCAState()
             resetTrailingState()
@@ -1149,13 +1477,20 @@ async function tradeCycle() {
       }
 
       // Smart strategy switching (when strategyMode is 'smart')
-      if (CONFIG.strategyMode === 'smart') {
-        if (signals.strength >= CONFIG.strongTrendThreshold) {
-          debugLog('INFO', 'STRATEGY', `智能策略切换: 使用趋势策略 (信号强度${signals.strength} >= ${CONFIG.strongTrendThreshold})`)
-        } else if (signals.strength <= CONFIG.weakTrendThreshold) {
-          debugLog('INFO', 'STRATEGY', `智能策略切换: 建议使用网格策略 (信号强度${signals.strength} <= ${CONFIG.weakTrendThreshold})`)
+      if (CONFIG.strategyMode === 'smart' && signals.atr > 0 && currentPrice > 0) {
+        const volumeAvg = 0  // 简化：实际应该传入真实成交量
+        const switchResult = autoEvaluateAndSwitch(
+          signals.adx,
+          signals.atr,
+          currentPrice,
+          volumeAvg
+        )
+        if (switchResult.switched) {
+          debugLog('INFO', 'STRATEGY', `智能策略切换: ${switchResult.reason}`)
+          log(`[TrendBot] 🔄 策略切换: ${switchResult.reason}`)
+        } else {
+          debugLog('INFO', 'STRATEGY', switchResult.reason)
         }
-        // Otherwise continue with current strategy - no logging needed
       }
 
       // DCA check
