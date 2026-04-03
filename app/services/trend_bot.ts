@@ -252,9 +252,14 @@ function loadTradingSettings(): TradingSettings {
 }
 
 // ============ Logging Functions ============
+// Safe JSON stringify that handles BigInt
+function safeStringify(obj: any): string {
+  return JSON.stringify(obj, (k, v) => typeof v === 'bigint' ? v.toString() : v)
+}
+
 function debugLog(level: 'INFO' | 'WARN' | 'ERROR' | 'SUCCESS', category: string, message: string, details: any = null) {
   const timestamp = new Date().toISOString()
-  const detailsStr = details ? JSON.stringify(details) : null
+  const detailsStr = details ? safeStringify(details) : null
 
   try {
     const stmt = getDb().prepare(`
@@ -338,6 +343,19 @@ const signalHistory = {
 }
 
 // ============ API Functions ============
+async function setLeverage(leverage: number): Promise<boolean> {
+  try {
+    const result = await futuresApi.updatePositionLeverage('usdt', CONFIG.symbol, String(leverage))
+    debugLog('INFO', 'LEVERAGE', `设置杠杆成功: ${leverage}x`, result.body)
+    return true
+  } catch (e: any) {
+    const msg = e.response?.body?.message || e.message
+    debugLog('WARN', 'LEVERAGE', `设置杠杆失败: ${msg}，将尝试继续下单`, e.response?.body || null)
+    // 不阻断交易流程，继续尝试下单
+    return true
+  }
+}
+
 async function getPosition() {
   try {
     const result = await fetchPositionsAndBalance()
@@ -376,6 +394,9 @@ async function getFuturesBalance() {
 async function openLong(price: number, size: number): Promise<boolean> {
   try {
     const settings = loadTradingSettings()
+    // 设置杠杆
+    await setLeverage(settings.leverage)
+    
     // Gate.io futures size is in contracts (1 contract = 1 USDT notional)
     // Convert BTC amount to contract quantity
     const contractSize = Math.abs(Math.floor(size * price))
@@ -383,16 +404,18 @@ async function openLong(price: number, size: number): Promise<boolean> {
       debugLog('WARN', 'TRADE', `开多订单太小: ${size} BTC (${contractSize} contracts) < 最小10 contracts`)
       return false
     }
+    // 市价单: price="0" + tif="ioc"
     const order = {
       contract: CONFIG.symbol,
       type: 'buy',
-      price: String(price),
+      price: '0',
       size: String(contractSize),
-      leverage: String(settings.leverage),
-    }
+      tif: 'ioc',
+    } as any
 
     const result = await futuresApi.createFuturesOrder('usdt', order)
-    debugLog('SUCCESS', 'TRADE', `开多成功: ${size} BTC (${contractSize} contracts) @ ${price}`, result.body)
+    const body = result.body as any
+    debugLog('SUCCESS', 'TRADE', `开多成功: ${size} BTC (${contractSize} contracts) @ 市价, 状态: ${body.status}`, result.body)
     return true
   } catch (e: any) {
     const msg = e.response?.body?.message || e.message
@@ -404,17 +427,19 @@ async function openLong(price: number, size: number): Promise<boolean> {
 
 async function closeLong(price: number, size: number): Promise<boolean> {
   try {
-    // Convert BTC amount to contract quantity
-    const contractSize = Math.abs(Math.floor(size * price))
+    // 平多仓：使用 close=true 完全平仓，或使用 reduce_only
     const order = {
       contract: CONFIG.symbol,
       type: 'sell',
+      size: '0',  // size=0 表示全部平仓
       price: String(price),
-      size: String(contractSize),
-    }
+      close: true,  // 关闭持仓标志
+      tif: 'gtc',
+    } as any
 
     const result = await futuresApi.createFuturesOrder('usdt', order)
-    debugLog('SUCCESS', 'TRADE', `平多成功: ${size} BTC (${contractSize} contracts) @ ${price}`, result.body)
+    const body = result.body as any
+    debugLog('SUCCESS', 'TRADE', `平多成功: ${size} BTC @ ${price}, isClose: ${body.isClose}, 状态: ${body.status}`, result.body)
     return true
   } catch (e: any) {
     const msg = e.response?.body?.message || e.message
@@ -427,23 +452,29 @@ async function closeLong(price: number, size: number): Promise<boolean> {
 async function openShort(price: number, size: number): Promise<boolean> {
   try {
     const settings = loadTradingSettings()
+    // 设置杠杆
+    await setLeverage(settings.leverage)
+    
     // Gate.io futures size is in contracts (1 contract = 1 USDT notional)
     // Convert BTC amount to contract quantity
-    const contractSize = Math.abs(Math.floor(size * price))
-    if (contractSize < 10) {
-      debugLog('WARN', 'TRADE', `开空订单太小: ${size} BTC (${contractSize} contracts) < 最小10 contracts`)
+    // 关键：开空单需要使用负数的 size！
+    const contractSize = -Math.abs(Math.floor(size * price))  // 负数表示空单
+    if (Math.abs(contractSize) < 10) {
+      debugLog('WARN', 'TRADE', `开空订单太小: ${size} BTC (${Math.abs(contractSize)} contracts) < 最小10 contracts`)
       return false
     }
+    // 市价单: price="0" + tif="ioc"
     const order = {
       contract: CONFIG.symbol,
       type: 'sell',  // 开空 = 卖出
-      price: String(price),
-      size: String(contractSize),
-      leverage: String(settings.leverage),
-    }
+      price: '0',
+      size: String(contractSize),  // 负数！
+      tif: 'ioc',
+    } as any
 
     const result = await futuresApi.createFuturesOrder('usdt', order)
-    debugLog('SUCCESS', 'TRADE', `开空成功: ${size} BTC (${contractSize} contracts) @ ${price}`, result.body)
+    const body = result.body as any
+    debugLog('SUCCESS', 'TRADE', `开空成功: ${size} BTC (${Math.abs(contractSize)} contracts) @ 市价, 状态: ${body.status}`, result.body)
     return true
   } catch (e: any) {
     const msg = e.response?.body?.message || e.message
@@ -455,17 +486,19 @@ async function openShort(price: number, size: number): Promise<boolean> {
 
 async function closeShort(price: number, size: number): Promise<boolean> {
   try {
-    // Convert BTC amount to contract quantity
-    const contractSize = Math.abs(Math.floor(size * price))
+    // 平空仓：使用 close=true 完全平仓
     const order = {
       contract: CONFIG.symbol,
       type: 'buy',  // 平空 = 买入
+      size: '0',  // size=0 表示全部平仓
       price: String(price),
-      size: String(contractSize),
-    }
+      close: true,  // 关闭持仓标志
+      tif: 'gtc',
+    } as any
 
     const result = await futuresApi.createFuturesOrder('usdt', order)
-    debugLog('SUCCESS', 'TRADE', `平空成功: ${size} BTC (${contractSize} contracts) @ ${price}`, result.body)
+    const body = result.body as any
+    debugLog('SUCCESS', 'TRADE', `平空成功 @ ${price}, isClose: ${body.isClose}, 状态: ${body.status}`, result.body)
     return true
   } catch (e: any) {
     const msg = e.response?.body?.message || e.message
@@ -998,10 +1031,12 @@ async function tradeCycle() {
       if (pnlPercent !== null && pnlPercent <= -CONFIG.stopLossPercent) {
         log(`[TrendBot] 做空触发止损! 亏损${pnlPercent.toFixed(2)}%`)
         if (canTrade()) {
-          await closeShort(currentPrice, Math.abs(position.size))
-          recordTrade('close', 'short', position.size, currentPrice, `止损(${pnlPercent.toFixed(2)}%)`, pnlPercent)
-          signalHistory.lastTradeTime = Date.now()
-          resetTrailingState()
+          const success = await closeShort(currentPrice, Math.abs(position.size))
+          if (success) {
+            recordTrade('close', 'short', position.size, currentPrice, `止损(${pnlPercent.toFixed(2)}%)`, pnlPercent)
+            signalHistory.lastTradeTime = Date.now()
+            resetTrailingState()
+          }
         }
         return
       }
@@ -1034,10 +1069,12 @@ async function tradeCycle() {
         if (priceRisePercent >= CONFIG.trailingPercent / 100) {
           log(`[TrendBot] 做空触发追踪止损! 涨幅${(priceRisePercent * 100).toFixed(2)}% >= ${CONFIG.trailingPercent}%, 追踪价=${trailingTP.toFixed(2)}`)
           if (canTrade()) {
-            await closeShort(currentPrice, Math.abs(position.size))
-            recordTrade('close', 'short', position.size, currentPrice, `追踪止损(涨幅${(priceRisePercent * 100).toFixed(2)}%))`, pnlPercent)
-            signalHistory.lastTradeTime = Date.now()
-            resetTrailingState()
+            const success = await closeShort(currentPrice, Math.abs(position.size))
+            if (success) {
+              recordTrade('close', 'short', position.size, currentPrice, `追踪止损(涨幅${(priceRisePercent * 100).toFixed(2)}%))`, pnlPercent ?? 0)
+              signalHistory.lastTradeTime = Date.now()
+              resetTrailingState()
+            }
           }
           return
         }
@@ -1047,10 +1084,12 @@ async function tradeCycle() {
       if (signals.buy) {
         log(`[TrendBot] 平空仓: ${Math.abs(position.size)} BTC @ $${currentPrice}`)
         if (canTrade()) {
-          await closeShort(currentPrice, Math.abs(position.size))
-          recordTrade('close', 'short', position.size, currentPrice, signals.reason.join(' + '), pnlPercent)
-          signalHistory.lastTradeTime = Date.now()
-          resetTrailingState()
+          const success = await closeShort(currentPrice, Math.abs(position.size))
+          if (success) {
+            recordTrade('close', 'short', position.size, currentPrice, signals.reason.join(' + '), pnlPercent ?? 0)
+            signalHistory.lastTradeTime = Date.now()
+            resetTrailingState()
+          }
         }
       }
     } else if (isLong) {
@@ -1058,11 +1097,13 @@ async function tradeCycle() {
       if (pnlPercent !== null && pnlPercent <= -CONFIG.stopLossPercent) {
         log(`[TrendBot] 触发止损! 亏损${pnlPercent.toFixed(2)}%`)
         if (canTrade()) {
-          await closeLong(currentPrice, position.size)
-          recordTrade('close', 'long', position.size, currentPrice, `止损(${pnlPercent.toFixed(2)}%)`, pnlPercent)
-          signalHistory.lastTradeTime = Date.now()
-          resetDCAState()
-          resetTrailingState()
+          const success = await closeLong(currentPrice, position.size)
+          if (success) {
+            recordTrade('close', 'long', position.size, currentPrice, `止损(${pnlPercent.toFixed(2)}%)`, pnlPercent)
+            signalHistory.lastTradeTime = Date.now()
+            resetDCAState()
+            resetTrailingState()
+          }
         }
         return
       }
@@ -1095,11 +1136,13 @@ async function tradeCycle() {
         if (priceDropPercent >= CONFIG.trailingPercent / 100) {
           log(`[TrendBot] 触发追踪止损! 跌幅${(priceDropPercent * 100).toFixed(2)}% >= ${CONFIG.trailingPercent}%, 追踪价=${trailingTP.toFixed(2)}`)
           if (canTrade()) {
-            await closeLong(currentPrice, position.size)
-            recordTrade('close', 'long', position.size, currentPrice, `追踪止损(跌幅${(priceDropPercent * 100).toFixed(2)}%))`, pnlPercent)
-            signalHistory.lastTradeTime = Date.now()
-            resetDCAState()
-            resetTrailingState()
+            const success = await closeLong(currentPrice, position.size)
+            if (success) {
+              recordTrade('close', 'long', position.size, currentPrice, `追踪止损(跌幅${(priceDropPercent * 100).toFixed(2)}%))`, pnlPercent ?? 0)
+              signalHistory.lastTradeTime = Date.now()
+              resetDCAState()
+              resetTrailingState()
+            }
           }
           return
         }
@@ -1131,12 +1174,14 @@ async function tradeCycle() {
           const maxAffordable = balanceAvail > 0 ? (balanceAvail * 0.1 / (currentPrice / 10000)) : 0
           const actualAmount = Math.min(addAmount, Math.floor(maxAffordable * 100) / 100)
 
-          if (actualAmount >= 0.01) {
+          if (actualAmount >= 0.01 && pnlPercent !== null) {
             log(`[TrendBot] DCA加仓! 跌幅${pnlPercent.toFixed(2)}% >= ${CONFIG.dcaAddPercent}%`)
-            await openLong(currentPrice, actualAmount)
-            updateDCAState(actualAmount, currentPrice)
-            lastAddPositionTime = now
-            recordTrade('open', 'long', actualAmount, currentPrice, `DCA加仓(${pnlPercent.toFixed(2)}%)`)
+            const success = await openLong(currentPrice, actualAmount)
+            if (success) {
+              updateDCAState(actualAmount, currentPrice)
+              lastAddPositionTime = now
+              recordTrade('open', 'long', actualAmount, currentPrice, `DCA加仓(${pnlPercent.toFixed(2)}%)`)
+            }
           }
         }
       }
@@ -1145,11 +1190,13 @@ async function tradeCycle() {
       if (signals.sell) {
         log(`[TrendBot] 平多仓: ${position.size} BTC @ $${currentPrice}`)
         if (canTrade()) {
-          await closeLong(currentPrice, position.size)
-          recordTrade('close', 'long', position.size, currentPrice, signals.reason.join(' + '), pnlPercent)
-          signalHistory.lastTradeTime = Date.now()
-          resetDCAState()
-          resetTrailingState()
+          const success = await closeLong(currentPrice, position.size)
+          if (success) {
+            recordTrade('close', 'long', position.size, currentPrice, signals.reason.join(' + '), pnlPercent ?? 0)
+            signalHistory.lastTradeTime = Date.now()
+            resetDCAState()
+            resetTrailingState()
+          }
         }
       }
     } else {
@@ -1161,10 +1208,12 @@ async function tradeCycle() {
 
         if (amount >= 0.01 && canTrade()) {
           log(`[TrendBot] 开多仓: ${amount.toFixed(4)} BTC @ $${currentPrice} (信号强度${signals.strength}, 仓位比例${positionPercent}%)`)
-          await openLong(currentPrice, amount)
-          recordTrade('open', 'long', amount, currentPrice, signals.reason.join(' + '))
-          signalHistory.lastTradeTime = Date.now()
-          trailingActive = false
+          const success = await openLong(currentPrice, amount)
+          if (success) {
+            recordTrade('open', 'long', amount, currentPrice, signals.reason.join(' + '))
+            signalHistory.lastTradeTime = Date.now()
+            trailingActive = false
+          }
         }
       } else if (signals.sell) {
         // Open short position on sell signal
@@ -1174,10 +1223,12 @@ async function tradeCycle() {
 
         if (amount >= 0.01 && canTrade()) {
           log(`[TrendBot] 开空仓: ${amount.toFixed(4)} BTC @ $${currentPrice} (信号强度${signals.strength}, 仓位比例${positionPercent}%)`)
-          await openShort(currentPrice, amount)
-          recordTrade('open', 'short', -amount, currentPrice, signals.reason.join(' + '))
-          signalHistory.lastTradeTime = Date.now()
-          trailingActive = false
+          const success = await openShort(currentPrice, amount)
+          if (success) {
+            recordTrade('open', 'short', -amount, currentPrice, signals.reason.join(' + '))
+            signalHistory.lastTradeTime = Date.now()
+            trailingActive = false
+          }
         }
       }
     }
