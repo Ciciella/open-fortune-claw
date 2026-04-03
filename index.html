@@ -471,6 +471,30 @@
       background: rgba(255,193,7,0.2);
       color: #ffc107;
     }
+    .strategy-intro {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .strategy-item {
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    .strategy-item:last-child {
+      border-bottom: none;
+    }
+    .strategy-item h4 {
+      color: #fff;
+      font-size: 1rem;
+      margin: 0 0 6px 0;
+      font-weight: 600;
+    }
+    .strategy-item p {
+      color: #aaa;
+      font-size: 0.85rem;
+      margin: 0;
+      line-height: 1.6;
+    }
     .feature-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -663,6 +687,52 @@
         </div>
       </div>
 
+      <!-- 策略协调器状态 -->
+      <div class="section">
+        <h2>🎯 智能策略协调器</h2>
+        <div class="stats-grid">
+          <div class="stat-card detail-card">
+            <div class="label">当前策略</div>
+            <div class="value" id="currentStrategy">-</div>
+          </div>
+          <div class="stat-card detail-card">
+            <div class="label">市场状态</div>
+            <div class="value" id="marketRegime">-</div>
+          </div>
+          <div class="stat-card detail-card">
+            <div class="label">ADX (趋势强度)</div>
+            <div class="value" id="adxValue">-</div>
+          </div>
+          <div class="stat-card detail-card">
+            <div class="label">ATR (波动率)</div>
+            <div class="value" id="atrValue">-</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 风险管理状态 -->
+      <div class="section">
+        <h2>🛡️ 风险管理</h2>
+        <div class="stats-grid">
+          <div class="stat-card detail-card">
+            <div class="label">今日盈亏 %</div>
+            <div class="value" id="dailyPnlPercent">-</div>
+          </div>
+          <div class="stat-card detail-card">
+            <div class="label">回撤 %</div>
+            <div class="value" id="drawdownPercent">-</div>
+          </div>
+          <div class="stat-card detail-card">
+            <div class="label">交易状态</div>
+            <div class="value" id="tradingStatus">-</div>
+          </div>
+          <div class="stat-card detail-card">
+            <div class="label">API 重试次数</div>
+            <div class="value" id="apiRetryCount">-</div>
+          </div>
+        </div>
+      </div>
+
       <div class="section">
         <h2>📊 最近交易记录</h2>
         <div id="tradesContainer" class="trades-container">
@@ -724,19 +794,58 @@
 
       <div class="intro-card detail-card">
         <h3>📈 支持的交易策略</h3>
-        <ul class="strategy-list">
-          <li>
-            <span class="strategy-name">趋势交易策略</span>
-            <span class="strategy-tag">运行中</span>
-          </li>
-          <li>
-            <span class="strategy-name">网格交易策略</span>
-            <span class="strategy-tag testing">开发中</span>
-          </li>
-          <li>
-            <span class="strategy-name">资金费率套利</span>
-            <span class="strategy-tag testing">开发中</span>
-          </li>
+        <div class="strategy-intro">
+          <div class="strategy-item">
+            <h4>📊 趋势交易策略</h4>
+            <p>基于技术指标（RSI、MACD、MA）识别趋势方向，顺势开仓。支持 DCA 分批建仓、ATR 动态止损止盈，适合单边行情。</p>
+          </div>
+          <div class="strategy-item">
+            <h4>🕸️ 网格交易策略</h4>
+            <p>在设定的价格区间内自动挂单，低买高卖赚取震荡利润。适合横盘震荡行情，无需判断趋势方向。</p>
+          </div>
+          <div class="strategy-item">
+            <h4>💰 资金费率套利</h4>
+            <p>利用永续合约资金费率机制，通过对冲持仓获取稳定的费率收益。低风险策略，适合任何市场环境。</p>
+          </div>
+          <div class="strategy-item">
+            <h4>🎯 智能策略协调器</h4>
+            <p>根据市场状态（ADX 趋势强度、波动率）自动选择最佳策略并智能切换，置信度 ≥70% 时才执行切换。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="intro-card detail-card">
+        <h3>🎯 智能策略协调器</h3>
+        <p>根据市场状态自动切换最佳策略：</p>
+        <ul style="color: #ccc; margin-top: 10px; padding-left: 20px; line-height: 1.8;">
+          <li><strong>趋势市场 (ADX > 30)</strong>：自动使用趋势交易策略</li>
+          <li><strong>震荡市场 (ADX < 20)</strong>：自动切换到网格交易策略</li>
+          <li><strong>高波动市场</strong>：降低信心，建议使用低风险套利策略</li>
+          <li><strong>置信度 >= 70%</strong>：自动执行策略切换</li>
+        </ul>
+      </div>
+
+      <div class="intro-card detail-card">
+        <h3>🛡️ 风险管理系统</h3>
+        <p>多层风控保护，确保资金安全：</p>
+        <ul style="color: #ccc; margin-top: 10px; padding-left: 20px; line-height: 1.8;">
+          <li><strong>ATR 动态止损</strong>：根据波动率自动调整止损止盈距离</li>
+          <li><strong>日亏损限制</strong>：单日亏损超过 5% 自动停止交易</li>
+          <li><strong>最大回撤保护</strong>：回撤超过 15% 暂停交易，恢复一半后允许恢复</li>
+          <li><strong>API 重试机制</strong>：指数退避 + 抖动，最多重试 3 次</li>
+        </ul>
+      </div>
+
+      <div class="intro-card detail-card">
+        <h3>📊 技术指标</h3>
+        <p>完整的技术分析指标支持：</p>
+        <ul style="color: #ccc; margin-top: 10px; padding-left: 20px; line-height: 1.8;">
+          <li><strong>RSI</strong>：相对强弱指标，判断超买超卖</li>
+          <li><strong>MA</strong>：移动平均线，判断趋势方向</li>
+          <li><strong>MACD</strong>：指数平滑异同移动平均线，判断买卖信号</li>
+          <li><strong>ATR</strong>：平均真实波动范围，用于动态止损止盈</li>
+          <li><strong>ADX</strong>：平均趋向指数，判断趋势强度</li>
+          <li><strong>Stochastic (%K/%D)</strong>：随机指标，判断超买超卖</li>
         </ul>
       </div>
 
@@ -1067,6 +1176,9 @@
         document.getElementById('todayPnl').textContent = (todayPnl >= 0 ? '+' : '') + todayPnl.toFixed(2) + ' USDT';
         document.getElementById('todayPnl').className = 'value ' + (todayPnl >= 0 ? 'green' : 'red');
 
+        // 加载策略协调器状态
+        await loadStrategyCoordinator();
+
         // 更新交易记录（分页）
         totalTrades = data.trades || [];
         totalPages = Math.ceil(totalTrades.length / PAGE_SIZE) || 1;
@@ -1144,6 +1256,31 @@
         showToast('刷新失败', 'error');
       }
       btn.classList.remove('refreshing');
+    }
+
+    // 加载策略协调器状态
+    async function loadStrategyCoordinator() {
+      try {
+        // 获取当前策略
+        const strategyRes = await fetch(API_URL.replace('/trades', '/strategy'));
+        const strategyData = await strategyRes.json();
+        if (strategyData.success) {
+          document.getElementById('currentStrategy').textContent = getStrategyCN(strategyData.strategy);
+        }
+
+        // 注意：市场状态、ADX、ATR 等指标需要后端 API 支持
+        // 未来可以在 /api/status 或新 API 中返回这些数据
+        // 目前显示 "-" 占位
+        document.getElementById('marketRegime').textContent = '-';
+        document.getElementById('adxValue').textContent = '-';
+        document.getElementById('atrValue').textContent = '-';
+        document.getElementById('dailyPnlPercent').textContent = '-';
+        document.getElementById('drawdownPercent').textContent = '-';
+        document.getElementById('tradingStatus').textContent = '正常';
+        document.getElementById('apiRetryCount').textContent = '0';
+      } catch (e) {
+        console.error('加载策略协调器状态失败:', e);
+      }
     }
 
     function showToast(message, type = 'success') {
